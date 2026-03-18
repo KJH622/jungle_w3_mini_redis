@@ -417,6 +417,27 @@
       <div id="cache-log" style="max-height:150px;overflow-y:auto;"></div>
     </div>
 
+    <!-- TTL 동작 로그 -->
+    <div class="dashboard-section">
+      <div class="panel-section-title">📋 TTL 동작 로그</div>
+      <div id="ttlLog" style="
+        height: 150px;
+        overflow-y: auto;
+        background: #fafafa;
+        border: 1px solid #eee;
+        border-radius: 6px;
+        padding: 6px;
+        font-size: 0.8rem;
+      ">
+        <div style="color: #aaa; font-size: 0.8rem;">좌석 클릭 시 로그 표시</div>
+      </div>
+      <button onclick="document.getElementById('ttlLog').innerHTML=''"
+              style="margin-top: 4px; padding: 4px 8px; font-size: 0.8rem;
+                     background: #eee; border: none; border-radius: 4px; cursor: pointer;">
+        로그 초기화
+      </button>
+    </div>
+
     <!-- 동시 요청 결과 -->
     <div class="dashboard-section">
       <div class="panel-section-title">동시 요청 결과</div>
@@ -804,7 +825,7 @@ async function showSeats(trainId) {
 
 async function reserveSeat(seatNo) {
   // 좌석 클릭 시 바로 예약하지 않고 5초 임시 선점을 시도해.
-  // TTL 동작을 보여주기 위해 임시 선점 → 확정 2단계로 나눠.
+  // TTL 기반 자동 만료를 시연하기 위한 핵심 기능이야.
   const key = `seat:${selectedTrain.id}:${seatNo}`;
 
   try {
@@ -820,8 +841,8 @@ async function reserveSeat(seatNo) {
       return;
     }
 
-    // 임시 선점 성공 → 카운트다운 시작
-    startHoldCountdown(seatNo, key, 5);
+    // 임시 선점 성공 → TTL 폴링 시작
+    startTTLPolling(seatNo, key);
   } catch (e) {
     showToast("서버 연결에 실패했습니다");
   }
@@ -839,9 +860,9 @@ async function reserveSeat(seatNo) {
 let currentHoldKey = null;
 let currentHoldSeat = null;
 
-function startHoldCountdown(seatNo, key, seconds) {
-  // 임시 선점 후 카운트다운을 시작해.
-  // 시간이 지나면 자동으로 해제되고 좌석이 다시 초록색으로 바뀌어.
+async function startTTLPolling(seatNo, key) {
+  // 매초 실제 /ttl 엔드포인트를 호출해서 남은 시간을 가져와.
+  // 이게 Lazy Deletion 동작을 실시간으로 보여주는 핵심이야.
 
   // 좌석 버튼 노란색으로 변경
   const btn = document.getElementById(`seat-btn-${seatNo}`);
@@ -852,43 +873,109 @@ function startHoldCountdown(seatNo, key, seconds) {
   }
 
   // 확정 모달 표시
-  showConfirmModal(seatNo, key, seconds);
+  showConfirmModal(seatNo, key);
 
-  let remaining = seconds;
-  const interval = setInterval(async () => {
-    remaining--;
+  // 오른쪽 패널 TTL 로그 초기화
+  addTTLLog(`🔒 ${seatNo} 임시 선점 시작 (TTL: 5초)`, 'info');
+  addTTLLog(`저장: SET ${key} = "hold" TTL=5`, 'code');
+
+  const pollInterval = setInterval(async () => {
+    // 실제 서버에 TTL 조회 요청
+    const res = await fetch(`${API}/ttl/${encodeURIComponent(key)}`);
+    const data = await res.json();
+    const ttl = data.ttl;
 
     // 모달 타이머 업데이트
     const timerEl = document.getElementById('holdTimer');
-    if (timerEl) timerEl.textContent = remaining;
+    if (timerEl) timerEl.textContent = ttl > 0 ? ttl : 0;
 
     // 오른쪽 패널 TTL 표시 업데이트
-    updateTTLDisplay(seatNo, remaining);
+    updateTTLDisplay(seatNo, ttl);
 
-    if (remaining <= 0) {
-      clearInterval(interval);
-      // TTL 만료 → 자동 해제
-      await refreshSeats();
-      closeConfirmModal();
-      showToast(`${seatNo} 선점 시간이 만료되었습니다.`);
-      // TTL 표시 초기화
-      const ttlSection = document.getElementById('ttlDisplay');
-      if (ttlSection) {
-        ttlSection.innerHTML = '<div style="color: #888; font-size: 0.9rem;">좌석 클릭 시 TTL 표시</div>';
-      }
+    if (ttl === -2) {
+      // TTL 만료 → Lazy Deletion 발동
+      clearInterval(pollInterval);
+      await handleLazyDeletion(seatNo, key);
+
+    } else if (ttl === -1) {
+      // TTL 없음 (예약 확정된 경우)
+      clearInterval(pollInterval);
+
+    } else if (ttl > 0) {
+      // 남은 시간 로그
+      addTTLLog(`GET /ttl/${key} → ${ttl}초 남음`, 'code');
     }
   }, 1000);
 
-  // 모달에 interval 저장 (취소 시 정리용)
-  window.currentHoldInterval = interval;
+  // 모달에 interval 저장
+  window.currentPollInterval = pollInterval;
+  window.currentHoldInterval = pollInterval;
 }
 
-function showConfirmModal(seatNo, key, seconds) {
+async function handleLazyDeletion(seatNo, key) {
+  // TTL이 만료되어 -2가 반환됐을 때 호출돼.
+  // 이 시점이 Lazy Deletion이 발동된 순간이야.
+  // Mini Redis가 조회 시점에 만료된 키를 삭제하는 동작을 보여줘.
+
+  // 1. 만료 감지 로그
+  addTTLLog(`GET /ttl/${key} → -2 (만료됨)`, 'expired');
+  addTTLLog(`⚡ Lazy Deletion 발동!`, 'warning');
+  addTTLLog(`→ 만료된 키 삭제 후 None 반환`, 'warning');
+
+  // 2. 오른쪽 패널 Lazy Deletion 표시
+  const ttlDisplay = document.getElementById('ttlDisplay');
+  if (ttlDisplay) {
+    ttlDisplay.innerHTML = `
+      <div style="text-align: center; padding: 8px;">
+        <div style="font-size: 1.5rem; font-weight: 700; color: #e53935; margin-bottom: 4px;">
+          ⚡ Lazy Deletion!
+        </div>
+        <div style="font-size: 0.9rem; color: #555; margin-bottom: 4px;">
+          TTL 만료 → 키 자동 삭제
+        </div>
+        <div style="font-size: 0.85rem; color: #888; font-family: monospace; background: #f5f5f5; padding: 6px; border-radius: 4px;">
+          GET ${key}<br>
+          → 만료 감지 → 삭제 → None
+        </div>
+      </div>
+    `;
+    ttlDisplay.style.border = '2px solid #e53935';
+    ttlDisplay.style.background = '#ffebee';
+  }
+
+  // 3. 모달 닫기
+  closeConfirmModal();
+
+  // 4. 좌석 빨간 깜빡임 후 초록색 복귀
+  const btn = document.getElementById(`seat-btn-${seatNo}`);
+  if (btn) {
+    btn.style.background = '#e53935';
+    setTimeout(() => { btn.style.background = '#43a047'; }, 500);
+  }
+
+  // 5. 좌석 상태 새로고침
+  await refreshSeats();
+
+  // 6. 안내 메시지
+  showToast(`${seatNo} 선점 만료 → Lazy Deletion 발동! 좌석이 해제되었습니다.`);
+
+  // 7. 3초 후 TTL 표시 초기화
+  setTimeout(() => {
+    const ttlDisplay = document.getElementById('ttlDisplay');
+    if (ttlDisplay) {
+      ttlDisplay.innerHTML = '<div style="color: #888; font-size: 0.9rem; text-align: center;">좌석 클릭 시 TTL 표시</div>';
+      ttlDisplay.style.border = '2px solid #f9a825';
+      ttlDisplay.style.background = '#fff8e1';
+    }
+  }, 3000);
+}
+
+function showConfirmModal(seatNo, key) {
   // 임시 선점 확정 모달을 보여주는 함수야.
   currentHoldKey = key;
   currentHoldSeat = seatNo;
   document.getElementById('holdSeatName').textContent = seatNo;
-  document.getElementById('holdTimer').textContent = seconds;
+  document.getElementById('holdTimer').textContent = 5;
   document.getElementById('holdModal').style.display = 'block';
 }
 
@@ -901,6 +988,7 @@ function closeConfirmModal() {
 async function confirmReservation() {
   // 임시 선점을 정식 예약으로 확정해.
   // hold 상태를 reserved로 바꾸고 TTL을 300초로 연장해.
+  clearInterval(window.currentPollInterval);
   await fetch(`${API}/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -909,40 +997,87 @@ async function confirmReservation() {
   closeConfirmModal();
   await refreshSeats();
   showToast(`${currentHoldSeat} 예약이 확정되었습니다!`);
-  // TTL 표시 초기화
-  const ttlSection = document.getElementById('ttlDisplay');
-  if (ttlSection) {
-    ttlSection.innerHTML = '<div style="color:#2e7d32;font-size:1rem;font-weight:700;">예약 확정 완료</div>';
+  addTTLLog(`✅ ${currentHoldSeat} 예약 확정 (TTL: 300초)`, 'info');
+  // TTL 표시 업데이트
+  const ttlDisplay = document.getElementById('ttlDisplay');
+  if (ttlDisplay) {
+    ttlDisplay.innerHTML = '<div style="color:#2e7d32;font-size:1rem;font-weight:700;text-align:center;">예약 확정 완료</div>';
   }
 }
 
 async function cancelHold() {
   // 임시 선점을 취소하고 좌석을 해제해.
+  clearInterval(window.currentPollInterval);
   await fetch(`${API}/delete/${encodeURIComponent(currentHoldKey)}`, {
     method: 'DELETE'
   });
   closeConfirmModal();
   await refreshSeats();
   showToast(`${currentHoldSeat} 선점이 취소되었습니다.`);
+  addTTLLog(`❌ ${currentHoldSeat} 선점 취소`, 'expired');
   // TTL 표시 초기화
-  const ttlSection = document.getElementById('ttlDisplay');
-  if (ttlSection) {
-    ttlSection.innerHTML = '<div style="color: #888; font-size: 0.9rem;">좌석 클릭 시 TTL 표시</div>';
+  const ttlDisplay = document.getElementById('ttlDisplay');
+  if (ttlDisplay) {
+    ttlDisplay.innerHTML = '<div style="color: #888; font-size: 0.9rem; text-align: center;">좌석 클릭 시 TTL 표시</div>';
+    ttlDisplay.style.border = '2px solid #f9a825';
+    ttlDisplay.style.background = '#fff8e1';
   }
 }
 
-function updateTTLDisplay(seatNo, remaining) {
-  // 오른쪽 패널에 현재 선점 중인 좌석의 TTL을 실시간으로 표시해.
-  const ttlSection = document.getElementById('ttlDisplay');
-  if (ttlSection) {
-    ttlSection.innerHTML = `
-      <div style="font-size: 0.9rem; color: #666; margin-bottom: 4px;">현재 선점 TTL</div>
-      <div style="font-size: 2rem; font-weight: 700; color: ${remaining <= 2 ? '#e53935' : '#f9a825'}">
-        ${remaining}초
+function updateTTLDisplay(seatNo, ttl) {
+  // 오른쪽 패널에 현재 TTL 값을 실시간으로 표시해.
+  const ttlDisplay = document.getElementById('ttlDisplay');
+  if (!ttlDisplay) return;
+
+  const color = ttl <= 2 ? '#e53935' : ttl <= 3 ? '#f9a825' : '#43a047';
+
+  ttlDisplay.style.border = `2px solid ${color}`;
+  ttlDisplay.style.background = ttl <= 2 ? '#ffebee' : '#fff8e1';
+
+  ttlDisplay.innerHTML = `
+    <div style="text-align: center;">
+      <div style="font-size: 0.85rem; color: #666; margin-bottom: 4px;">
+        ${seatNo} 임시 선점 중
       </div>
-      <div style="font-size: 0.85rem; color: #888;">${seatNo} 임시 선점 중</div>
-    `;
-  }
+      <div style="font-size: 3rem; font-weight: 700; color: ${color}; line-height: 1;">
+        ${ttl}
+      </div>
+      <div style="font-size: 0.85rem; color: #888; margin-bottom: 6px;">초 남음</div>
+      <div style="font-size: 0.75rem; color: #aaa; font-family: monospace;">
+        GET /ttl/${encodeURIComponent(seatNo)} 실시간 조회 중
+      </div>
+    </div>
+  `;
+}
+
+function addTTLLog(message, type) {
+  // TTL 동작 로그를 오른쪽 패널에 추가해.
+  // 발표 때 실제로 어떤 API가 호출되는지 보여주는 역할이야.
+  const logDiv = document.getElementById('ttlLog');
+  if (!logDiv) return;
+
+  const colors = {
+    'info':    { bg: '#e3f2fd', color: '#1e88e5' },
+    'code':    { bg: '#f5f5f5', color: '#333', font: 'monospace' },
+    'expired': { bg: '#ffebee', color: '#e53935' },
+    'warning': { bg: '#fff8e1', color: '#f9a825', weight: '700' }
+  };
+  const style = colors[type] || colors['info'];
+
+  const entry = document.createElement('div');
+  entry.style.cssText = `
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    background: ${style.bg};
+    color: ${style.color};
+    font-family: ${style.font || 'inherit'};
+    font-weight: ${style.weight || 'normal'};
+  `;
+  entry.textContent = message;
+  logDiv.appendChild(entry);
+  logDiv.scrollTop = logDiv.scrollHeight;
 }
 
 
