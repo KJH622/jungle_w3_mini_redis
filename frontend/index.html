@@ -408,7 +408,31 @@
       <div id="redisCompareResult" style="display: none; margin-top: 12px;"></div>
     </div>
 
-    <!-- 캐시 로그 -->
+    <!-- Cache Aside 동작 로그 -->
+    <div class="dashboard-section">
+      <div class="panel-section-title">🗄️ Cache Aside 동작 로그</div>
+      <button onclick="flushAndLog()"
+              style="width: 100%; padding: 8px; margin-bottom: 8px;
+                     background: #e53935; color: white; border: none;
+                     border-radius: 6px; font-size: 0.9rem; cursor: pointer;
+                     font-weight: 600;">
+        🗑️ 캐시 초기화 (MISS 유도)
+      </button>
+      <div id="cacheLog" style="
+        height: 180px;
+        overflow-y: auto;
+        background: #fafafa;
+        border: 1px solid #eee;
+        border-radius: 6px;
+        padding: 6px;
+      ">
+        <div style="color: #aaa; font-size: 0.82rem;">
+          노선 조회 시 Cache Aside 흐름이 여기 표시됩니다
+        </div>
+      </div>
+    </div>
+
+    <!-- 기존 캐시 로그 (간단한 HIT/MISS 이력) -->
     <div class="dashboard-section">
       <div class="panel-section-title">캐시 로그</div>
       <div id="cache-log" style="max-height:150px;overflow-y:auto;"></div>
@@ -567,6 +591,63 @@ function addCacheLog(type, key) {
   </div>` + log.innerHTML;
 }
 
+function clearCacheLog() {
+  // Cache Aside 동작 로그를 초기화해.
+  const logDiv = document.getElementById('cacheLog');
+  if (logDiv) logDiv.innerHTML = '';
+}
+
+function addCacheDetailLog(message, type) {
+  // Cache Aside 패턴의 각 단계를 로그로 표시해.
+  // 발표 때 캐시가 어떻게 동작하는지 실시간으로 보여줘.
+  const logDiv = document.getElementById('cacheLog');
+  if (!logDiv) return;
+
+  const styles = {
+    'info':  { bg: '#e3f2fd', color: '#1e88e5' },
+    'hit':   { bg: '#e8f5e9', color: '#2e7d32', weight: '600' },
+    'miss':  { bg: '#ffebee', color: '#c62828', weight: '600' },
+    'db':    { bg: '#fff3e0', color: '#e65100' },
+    'save':  { bg: '#f3e5f5', color: '#7b1fa2' },
+    'code':  { bg: '#f5f5f5', color: '#333', font: 'monospace' },
+    'time':  { bg: '#f5f5f5', color: '#888' },
+  };
+  const s = styles[type] || styles['info'];
+
+  const entry = document.createElement('div');
+  entry.style.cssText = `
+    padding: 4px 8px;
+    margin: 2px 0;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    background: ${s.bg};
+    color: ${s.color};
+    font-family: ${s.font || 'inherit'};
+    font-weight: ${s.weight || 'normal'};
+  `;
+  entry.textContent = message;
+  logDiv.appendChild(entry);
+  logDiv.scrollTop = logDiv.scrollHeight;
+}
+
+async function flushAndLog() {
+  // 캐시를 초기화해서 다음 조회 시 MISS가 발생하게 해.
+  // 발표 때 "지금 캐시를 비워서 MISS를 만들어보겠습니다"라고 설명할 수 있어.
+  await fetch(`${API}/flush`, { method: 'DELETE' });
+
+  clearCacheLog();
+  addCacheDetailLog('🗑️ 캐시 전체 초기화 완료', 'miss');
+  addCacheDetailLog('→ DELETE /flush 실행됨', 'code');
+  addCacheDetailLog('→ 다음 노선 조회 시 MISS 발생', 'info');
+
+  // HIT/MISS 카운터 초기화
+  hitCount = 0;
+  missCount = 0;
+  updateHitMissChart();
+
+  showToast('캐시 초기화 완료 — 다음 조회 시 MISS 발생합니다');
+}
+
 
 // ──────────────────────────────────────────────
 // FIX 1: 출발지/도착지 동일 선택 방지
@@ -670,21 +751,43 @@ async function searchTrains() {
   }
 
   const statusEl = document.getElementById("cache-status");
+  const cacheKey = `trains:${from}:${to}`;
+
+  // 캐시 로그 시작
+  clearCacheLog();
+  addCacheDetailLog(`🔍 노선 조회 시작: ${from} → ${to}`, 'info');
+  addCacheDetailLog(`GET /get/${cacheKey}`, 'code');
 
   try {
-    // /trains/cached API를 호출해서 열차 목록을 가져와.
-    // 서버에서 캐시 히트/미스를 판단하고 결과를 알려줘.
     const res = await fetch(
       `${API}/trains/cached?from_station=${encodeURIComponent(from)}&to_station=${encodeURIComponent(to)}`
     );
     const data = await res.json();
 
-    // 캐시 히트/미스 정보를 대시보드에 전달해.
     const isHit = data.source === 'cache_hit';
+
+    // Cache Aside 흐름 로그
+    if (isHit) {
+      addCacheDetailLog(`✅ Cache HIT!`, 'hit');
+      addCacheDetailLog(`→ Mini Redis에서 즉시 반환`, 'hit');
+      addCacheDetailLog(`→ DB 조회 없음 (부하 없음)`, 'hit');
+      addCacheDetailLog(`응답 시간: ${data.elapsed_ms}ms`, 'time');
+    } else {
+      addCacheDetailLog(`❌ Cache MISS`, 'miss');
+      addCacheDetailLog(`→ Mini Redis에 데이터 없음`, 'miss');
+      addCacheDetailLog(`DB 조회 중... (SQLite)`, 'db');
+      addCacheDetailLog(`→ ${data.trains.length}개 열차 데이터 반환`, 'db');
+      addCacheDetailLog(`Mini Redis에 저장 (TTL: 60초)`, 'save');
+      addCacheDetailLog(`SET ${cacheKey} = [열차데이터] TTL=60`, 'code');
+      addCacheDetailLog(`응답 시간: ${data.elapsed_ms}ms`, 'time');
+      addCacheDetailLog(`💡 다음 조회부터 HIT됩니다`, 'info');
+    }
+
+    // 대시보드 업데이트
     updateDashboard({
       type: isHit ? 'HIT' : 'MISS',
       responseTime: data.elapsed_ms,
-      key: `trains:${from}:${to}`
+      key: cacheKey
     });
 
     // 캐시 상태 배지 표시
