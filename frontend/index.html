@@ -432,6 +432,10 @@ let missCount = 0;
 // showSeats에서 열차 정보를 찾을 때 사용해.
 let lastTrainResults = [];
 
+// 동시 예약 테스트용으로 선택된 좌석 번호야.
+// 좌석을 클릭하면 여기 저장되고, '동시 예약 시도' 버튼을 누르면 사용돼.
+let selectedSeat = null;
+
 
 // ──────────────────────────────────────────────
 // 유틸리티 함수
@@ -545,7 +549,10 @@ async function refreshSeats() {
     if (reserved) {
       seatsHtml += `<button class="seat-btn reserved" disabled>${seat} X</button>`;
     } else {
-      seatsHtml += `<button class="seat-btn available" onclick="reserveSeat('${trainId}','${seat}')">${seat} O</button>`;
+      seatsHtml += `<button class="seat-btn available"
+        onclick="reserveSeat('${trainId}','${seat}')"
+        oncontextmenu="selectSeatForConcurrent('${seat}'); return false;"
+        title="클릭: 예약 / 우클릭: 동시예약 테스트 선택">${seat} O</button>`;
     }
   });
   seatGrid.innerHTML = seatsHtml;
@@ -663,14 +670,21 @@ async function showSeats(trainId) {
     }))
   );
 
+  // 좌석 버튼을 그려. 클릭하면 바로 예약, 우클릭하면 동시 테스트용 선택.
   let seatsHtml = '';
   seatStatuses.forEach(({ seat, reserved }) => {
     if (reserved) {
       seatsHtml += `<button class="seat-btn reserved" disabled>${seat} X</button>`;
     } else {
-      seatsHtml += `<button class="seat-btn available" onclick="reserveSeat('${trainId}','${seat}')">${seat} O</button>`;
+      seatsHtml += `<button class="seat-btn available"
+        onclick="reserveSeat('${trainId}','${seat}')"
+        oncontextmenu="selectSeatForConcurrent('${seat}'); return false;"
+        title="클릭: 예약 / 우클릭: 동시예약 테스트 선택">${seat} O</button>`;
     }
   });
+
+  // 동시 예약 선택 좌석 초기화
+  selectedSeat = null;
 
   content.innerHTML = `
     <button class="back-btn" onclick="searchTrains()">&larr; 목록으로</button>
@@ -680,18 +694,30 @@ async function showSeats(trainId) {
 
       <div style="font-weight:600;margin-bottom:8px;">좌석 현황:</div>
       <div class="seat-grid">${seatsHtml}</div>
-      <div class="seat-legend">O 예약 가능 &nbsp;&nbsp; X 예약 완료</div>
+      <div class="seat-legend">클릭: 예약 &nbsp;&nbsp; 우클릭: 동시 테스트 선택 &nbsp;&nbsp; O 예약 가능 &nbsp;&nbsp; X 예약 완료</div>
 
-      <div class="concurrent-section">
-        <h4>동시 예약 시뮬레이션</h4>
-        <div class="concurrent-controls">
-          <span>인원 수:</span>
-          <input type="number" id="concurrent-count" value="5" min="2" max="20">
-          <span>명</span>
-          <button onclick="concurrentReserve('${trainId}')">동시 예약 시도</button>
+      <div style="margin-top:16px;padding:12px;background:#f9f9f9;border-radius:8px;">
+        <div style="font-weight:600;margin-bottom:8px;">🎯 동시 예약 시뮬레이션</div>
+        <div style="margin-bottom:8px;">
+          선택된 좌석:
+          <span id="selectedSeatDisplay"
+                style="padding:4px 12px;border-radius:4px;background:#eee;font-weight:700;">
+            좌석을 우클릭하세요
+          </span>
         </div>
-        <div id="concurrent-result"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <label>동시 시도 인원:</label>
+          <input id="concurrentCount" type="number" value="5" min="2" max="20"
+                 style="width:60px;padding:4px 8px;font-size:1rem;">
+          <span>명</span>
+        </div>
+        <button onclick="concurrentReserve()"
+                style="padding:8px 20px;background:#e53935;color:white;
+                       border:none;border-radius:6px;font-size:1rem;cursor:pointer;font-weight:600;">
+          동시 예약 시도
+        </button>
       </div>
+      <div id="concurrent-result" style="margin-top:12px;"></div>
     </div>
   `;
 }
@@ -734,108 +760,95 @@ async function reserveSeat(trainId, seat) {
 // 동시 예약 시뮬레이션
 // ──────────────────────────────────────────────
 
-async function concurrentReserve(trainId) {
-  // 같은 좌석(A1)을 여러 명이 동시에 예약 시도하는 시뮬레이션이야.
-  // Barrier 패턴을 사용해서 모든 요청이 준비된 후 동시에 출발해.
-  // 마치 출발선에 모든 선수가 서 있다가 출발 신호를 받고 동시에 뛰는 것처럼.
-  // 이렇게 해야 사용자 1이 항상 먼저 도착하는 문제를 없앨 수 있어.
-  const count = parseInt(document.getElementById("concurrent-count").value) || 5;
-  const resultDiv = document.getElementById("concurrent-result");
-  const seat = "A1";
-  const key = `seat:${trainId}:${seat}`;
+function selectSeatForConcurrent(seatNo) {
+  // 동시 예약 테스트용으로 좌석을 선택하는 함수야.
+  // 좌석을 우클릭하면 이 함수가 호출돼서 선택한 좌석 번호를 저장해.
+  // 바로 예약하는 게 아니라 '동시 예약 시도' 버튼을 누를 때 사용돼.
+  selectedSeat = seatNo;
+  const display = document.getElementById('selectedSeatDisplay');
+  display.textContent = seatNo;
+  display.style.background = '#1e88e5';
+  display.style.color = 'white';
+}
 
-  // 먼저 해당 좌석 예약을 초기화 (테스트를 위해)
-  try {
-    await fetch(`${API}/delete/${key}`, { method: "DELETE" });
-  } catch (e) {}
+async function concurrentReserve() {
+  // 서버에서 threading으로 진짜 동시 예약을 시도하는 함수야.
+  // 브라우저 JS는 싱글 스레드라 진짜 동시성 구현이 불가능해서
+  // 서버 API에 맡겨서 실제 threading.Lock 경쟁을 만들어내.
+  // 서버에서 n개 스레드가 Barrier로 동시에 출발해서 set_nx를 호출해.
 
+  // 좌석이 선택되지 않았으면 안내 메시지를 보여줘
+  if (!selectedSeat) {
+    showToast('먼저 좌석을 우클릭으로 선택해주세요.');
+    return;
+  }
+
+  // 이미 예약된 좌석인지 확인해
+  const isReserved = await isSeatReserved(selectedTrain.id, selectedSeat);
+  if (isReserved) {
+    showToast(`${selectedSeat} 좌석은 이미 예약되어 있습니다.`);
+    return;
+  }
+
+  const n = parseInt(document.getElementById('concurrentCount').value) || 5;
+  const resultDiv = document.getElementById('concurrent-result');
   resultDiv.innerHTML = '<p style="color:#999">시뮬레이션 실행 중...</p>';
 
-  // Barrier 역할을 하는 Promise야.
-  // 모든 사용자가 준비될 때까지 기다렸다가 동시에 출발시켜.
-  let startSignal;
-  const barrier = new Promise(resolve => {
-    startSignal = resolve;  // 출발 신호를 외부에서 쏠 수 있게 저장해둬
-  });
+  try {
+    // 서버에서 threading으로 진짜 동시 예약 시도
+    const res = await fetch(
+      `${API}/benchmark/concurrent?train_id=${selectedTrain.id}&seat=${selectedSeat}&n=${n}`,
+      { method: 'POST' }
+    );
+    const data = await res.json();
 
-  // N명의 요청을 미리 준비해 (아직 보내지 않음)
-  // 각 요청 함수는 barrier를 await하면서 출발 신호를 기다려.
-  const requests = Array.from({ length: count }, (_, i) => {
-    return async () => {
-      // 출발 신호 대기 - 모든 사용자가 여기서 동시에 대기해
-      await barrier;
-
-      // 신호가 오면 동시에 요청 출발
-      const reqStart = Date.now();
-      try {
-        const res = await fetch(`${API}/setnx`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key, value: `user-${i + 1}`, ttl: 300 }),
-        });
-        const data = await res.json();
-        const reqEnd = Date.now();
-        return {
-          userId: i + 1,
-          success: data.success,
-          message: data.message,
-          responseTime: reqEnd - reqStart,
-        };
-      } catch (e) {
-        return { userId: i + 1, success: false, message: "서버 오류", responseTime: 0 };
-      }
-    };
-  });
-
-  // 모든 요청 함수를 실행 대기 상태로 올려놔
-  // 이 시점에서 모든 요청이 barrier에서 대기 중이야.
-  const pending = requests.map(req => req());
-
-  // 출발 신호 발사! 이 순간 모든 요청이 동시에 서버로 향해.
-  const startTime = Date.now();
-  startSignal();
-
-  // 모든 결과 수집
-  const results = await Promise.all(pending);
-  const totalTime = Date.now() - startTime;
-  const successCount = results.filter(r => r.success).length;
-  const failCount = results.filter(r => !r.success).length;
-  const successUser = results.find(r => r.success);
-
-  // 결과 표시
-  resultDiv.innerHTML = `
-    <div class="result-log">
-      <strong>동시 예약 결과 (${count}명이 A1 좌석에 동시 시도)</strong>
-      <p style="color:#888;margin:4px 0">총 소요 시간: ${totalTime}ms</p>
-      <br>
-      ${results.map(r => `
-        <div style="padding:4px 0; color: ${r.success ? '#2e7d32' : '#c62828'}">
-          ${r.success ? 'O' : 'X'} 사용자 ${r.userId} - ${r.message}
-          <span style="color:#888; font-size:0.85em">(${r.responseTime}ms)</span>
+    // 결과 표시
+    resultDiv.innerHTML = `
+      <div class="result-log">
+        <strong>동시 예약 결과 (${n}명이 ${selectedSeat} 좌석에 동시 시도)</strong>
+        <br><br>
+        ${data.results.map(r => `
+          <div style="padding:5px 0;font-size:1rem;color:${r.success ? '#2e7d32' : '#c62828'}">
+            ${r.success ? '✅' : '❌'} 사용자 ${r.userId} - ${r.message}
+            <span style="color:#888;font-size:0.85rem">(${r.responseTime}ms)</span>
+          </div>
+        `).join('')}
+        <div style="margin-top:10px;padding:10px;background:#e8f5e9;border-radius:6px;font-size:1rem;">
+          🔒 threading.Lock 동작 확인<br>
+          성공 <strong>${data.success_count}명</strong> /
+          실패 <strong>${data.fail_count}명</strong>
+          ${data.winner ? ` - 최종 예약자: <strong>사용자 ${data.winner}</strong>` : ''}
         </div>
-      `).join('')}
-      <div style="margin-top:8px; padding:8px; background:#e8f5e9; border-radius:4px">
-        Lock 동작 확인: 성공 ${successCount}명 / 실패 ${failCount}명
-        ${successUser ? ` - 최종 예약자: user-${successUser.userId}` : ''}
       </div>
-    </div>
-  `;
+    `;
 
-  // 동시 요청 결과를 오른쪽 대시보드에도 표시해 (발표용 큰 폰트)
-  const concDash = document.getElementById('concurrent-dashboard');
-  concDash.innerHTML = `
-    <div>
-      <div class="concurrent-result-item"><strong>${count}명 동시 시도</strong> (${totalTime}ms)</div>
-      <div class="concurrent-result-item" style="color:#2e7d32;">성공: ${successCount}명</div>
-      <div class="concurrent-result-item" style="color:#c62828;">실패: ${failCount}명</div>
-      <div class="concurrent-summary">
-        ${successUser ? `🔒 최종 예약자: user-${successUser.userId}` : '예약 실패'}
+    // 동시 요청 결과를 오른쪽 대시보드에도 표시해 (발표용 큰 폰트)
+    const concDash = document.getElementById('concurrent-dashboard');
+    concDash.innerHTML = `
+      <div>
+        <div class="concurrent-result-item"><strong>${n}명 동시 시도</strong> (${selectedSeat})</div>
+        <div class="concurrent-result-item" style="color:#2e7d32;">성공: ${data.success_count}명</div>
+        <div class="concurrent-result-item" style="color:#c62828;">실패: ${data.fail_count}명</div>
+        <div class="concurrent-summary">
+          ${data.winner ? `🔒 최종 예약자: 사용자 ${data.winner}` : '예약 실패'}
+        </div>
       </div>
-    </div>
-  `;
+    `;
+  } catch (e) {
+    resultDiv.innerHTML = '<p style="color:#c62828">서버 연결에 실패했습니다</p>';
+  }
 
-  // 좌석 상태만 새로고침 (결과창 유지)
+  // 좌석 상태 새로고침
   await refreshSeats();
+
+  // 선택 초기화
+  selectedSeat = null;
+  const display = document.getElementById('selectedSeatDisplay');
+  if (display) {
+    display.textContent = '좌석을 우클릭하세요';
+    display.style.background = '#eee';
+    display.style.color = 'black';
+  }
 }
 
 // ──────────────────────────────────────────────
