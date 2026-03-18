@@ -8,8 +8,11 @@ Mini Redis — FastAPI 앱 진입점
 
 from contextlib import asynccontextmanager
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from app.api.routes import router
 from app.core.store import store
 from app.core.persistence import load_snapshot, save_snapshot, start_auto_snapshot
@@ -73,7 +76,16 @@ app.include_router(router)
 
 
 # ──────────────────────────────────────────────
-# 4. 헬스체크 엔드포인트
+# 4. 프론트엔드 정적 파일 서빙
+# ──────────────────────────────────────────────
+# frontend/ 폴더의 HTML 파일을 /front 경로로 접근할 수 있게 해줘.
+# 브라우저에서 http://localhost:8000/front/index.html 로 데모 화면을 볼 수 있어.
+FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+app.mount("/front", StaticFiles(directory=str(FRONTEND_DIR), html=True), name="frontend")
+
+
+# ──────────────────────────────────────────────
+# 5. 헬스체크 엔드포인트
 # ──────────────────────────────────────────────
 @app.get("/health")
 def health_check():
