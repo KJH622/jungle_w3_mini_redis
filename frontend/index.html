@@ -1123,8 +1123,8 @@ async function pollTTL(seatNo, key) {
     // 예약 확정된 경우 → 폴링 종료
     return;
 
-  } else if (ttl > 0) {
-    // 남은 시간 로그
+  } else if (ttl >= 0) {
+    // 남은 시간 로그 (0일 때도 다음 폴링을 해야 -2를 감지할 수 있어)
     addTTLLog(`GET /ttl/${key} → ${ttl}초 남음`, 'code');
 
     // 1초 후 다시 조회
