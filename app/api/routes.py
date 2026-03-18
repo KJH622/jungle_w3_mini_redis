@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException
 from app.core.store import store
 from app.models.schemas import (
     SetRequest,
+    SetNxRequest,
+    SetNxResponse,
     ExpireRequest,
     ValueResponse,
     ExistsResponse,
@@ -42,6 +44,17 @@ async def set_value(request: SetRequest):
     # Codex 추가: 저장이 끝나면 공통 성공 메시지를 응답 모델에 담아 반환한다.
     return MessageResponse(message="OK")
     # Codex 추가 끝
+
+
+@router.post("/setnx", response_model=SetNxResponse)
+async def set_if_not_exists(request: SetNxRequest):
+    # 키가 없을 때만 저장하는 엔드포인트야. (Set if Not eXists)
+    # 좌석 예약에 사용하며, 동시에 여러 명이 요청해도 1명만 성공해.
+    # 성공하면 success: true, 이미 있으면 success: false를 반환해.
+    success = store.set_nx(request.key, request.value, request.ttl)
+    if success:
+        return SetNxResponse(success=True, message="예약 성공")
+    return SetNxResponse(success=False, message="이미 예약된 좌석입니다")
 
 
 @router.get("/get/{key}", response_model=ValueResponse)
