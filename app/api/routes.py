@@ -262,3 +262,60 @@ async def benchmark_trains(n: int = 100, from_station: str = "서울", to_statio
         "real_redis_ms": None,  # 13번에서 채움
         "speedup": speedup
     }
+
+
+@router.post("/benchmark/concurrent")
+async def benchmark_concurrent(train_id: str, seat: str, n: int = 5):
+    """
+    서버에서 직접 n개의 스레드가 동시에 같은 좌석을 예약 시도하는 엔드포인트야.
+    브라우저 JS는 싱글 스레드라 진짜 동시성 시연이 불가능해.
+    서버 threading을 쓰면 진짜 동시에 Lock 경쟁이 발생해.
+    """
+    import threading
+
+    seat_key = f"seat:{train_id}:{seat}"
+
+    # 테스트 전 해당 좌석 초기화
+    store.delete(seat_key)
+
+    results = []
+    result_lock = threading.Lock()
+
+    # Barrier: 모든 스레드가 준비된 후 동시에 출발
+    # 마치 출발선에 모든 선수가 서 있다가 신호를 받고 동시에 뛰는 것처럼
+    barrier = threading.Barrier(n)
+
+    def try_reserve(user_id: int):
+        # 모든 스레드가 여기서 대기했다가 동시에 출발해
+        barrier.wait()
+
+        start = time()
+        success = store.set_nx(seat_key, f"user-{user_id}", ttl=300)
+        elapsed = int((time() - start) * 1000)
+
+        with result_lock:
+            results.append({
+                "userId": user_id,
+                "success": success,
+                "message": "예약 성공" if success else "이미 예약된 좌석입니다",
+                "responseTime": elapsed
+            })
+
+    # n개 스레드 생성 및 실행
+    threads = [threading.Thread(target=try_reserve, args=(i + 1,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    success_user = next((r for r in results if r["success"]), None)
+
+    return {
+        "seat": seat,
+        "train_id": train_id,
+        "total": n,
+        "success_count": sum(1 for r in results if r["success"]),
+        "fail_count": sum(1 for r in results if not r["success"]),
+        "winner": success_user["userId"] if success_user else None,
+        "results": sorted(results, key=lambda x: x["userId"])
+    }
