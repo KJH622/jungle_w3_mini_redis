@@ -286,6 +286,21 @@
       </div>
     </div>
 
+    <!-- TTL 실시간 표시 -->
+    <div class="dashboard-section">
+      <div class="panel-section-title">TTL 실시간 표시</div>
+      <div id="ttlDisplay" style="
+        background: #fff8e1;
+        border: 2px solid #f9a825;
+        border-radius: 8px;
+        padding: 14px;
+        text-align: center;
+        min-height: 80px;
+      ">
+        <div style="color: #888; font-size: 0.9rem;">좌석 클릭 시 TTL 표시</div>
+      </div>
+    </div>
+
     <!-- 응답 시간 비교 바 차트 -->
     <div class="dashboard-section">
       <div class="panel-section-title">응답 시간 비교</div>
@@ -410,6 +425,48 @@
       </div>
     </div>
   </div>
+</div>
+
+<!-- 임시 선점 확정 모달 -->
+<div id="holdModal" style="
+    display: none;
+    position: fixed;
+    top: 50%;
+    left: 30%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border: 2px solid #f9a825;
+    border-radius: 12px;
+    padding: 24px;
+    z-index: 1000;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    min-width: 280px;
+    text-align: center;
+">
+    <div style="font-size: 1.2rem; font-weight: 700; margin-bottom: 8px;">
+        ⏱️ 임시 선점 중
+    </div>
+    <div style="font-size: 1rem; color: #666; margin-bottom: 16px;">
+        <span id="holdSeatName"></span> 좌석
+    </div>
+    <div style="font-size: 3rem; font-weight: 700; color: #f9a825; margin-bottom: 8px;">
+        <span id="holdTimer">5</span>
+    </div>
+    <div style="font-size: 0.9rem; color: #888; margin-bottom: 16px;">
+        초 안에 예약을 확정하세요
+    </div>
+    <div style="display: flex; gap: 8px; justify-content: center;">
+        <button onclick="confirmReservation()"
+                style="padding: 10px 20px; background: #43a047; color: white;
+                       border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 600;">
+            예약 확정
+        </button>
+        <button onclick="cancelHold()"
+                style="padding: 10px 20px; background: #e53935; color: white;
+                       border: none; border-radius: 6px; font-size: 1rem; cursor: pointer; font-weight: 600;">
+            취소
+        </button>
+    </div>
 </div>
 
 <!-- 토스트 알림 -->
@@ -565,12 +622,12 @@ async function refreshSeats() {
   let seatsHtml = '';
   seatStatuses.forEach(({ seat, reserved }) => {
     if (reserved) {
-      seatsHtml += `<button class="seat-btn reserved" disabled>${seat} X</button>`;
+      seatsHtml += `<button id="seat-btn-${seat}" class="seat-btn reserved" disabled>${seat} X</button>`;
     } else {
-      seatsHtml += `<button class="seat-btn available"
-        onclick="reserveSeat('${trainId}','${seat}')"
+      seatsHtml += `<button id="seat-btn-${seat}" class="seat-btn available"
+        onclick="reserveSeat('${seat}')"
         oncontextmenu="selectSeatForConcurrent('${seat}'); return false;"
-        title="클릭: 예약 / 우클릭: 동시예약 테스트 선택">${seat} O</button>`;
+        title="클릭: 임시선점 / 우클릭: 동시예약 테스트 선택">${seat} O</button>`;
     }
   });
   seatGrid.innerHTML = seatsHtml;
@@ -692,12 +749,12 @@ async function showSeats(trainId) {
   let seatsHtml = '';
   seatStatuses.forEach(({ seat, reserved }) => {
     if (reserved) {
-      seatsHtml += `<button class="seat-btn reserved" disabled>${seat} X</button>`;
+      seatsHtml += `<button id="seat-btn-${seat}" class="seat-btn reserved" disabled>${seat} X</button>`;
     } else {
-      seatsHtml += `<button class="seat-btn available"
-        onclick="reserveSeat('${trainId}','${seat}')"
+      seatsHtml += `<button id="seat-btn-${seat}" class="seat-btn available"
+        onclick="reserveSeat('${seat}')"
         oncontextmenu="selectSeatForConcurrent('${seat}'); return false;"
-        title="클릭: 예약 / 우클릭: 동시예약 테스트 선택">${seat} O</button>`;
+        title="클릭: 임시선점 / 우클릭: 동시예약 테스트 선택">${seat} O</button>`;
     }
   });
 
@@ -745,29 +802,26 @@ async function showSeats(trainId) {
 // 좌석 예약
 // ──────────────────────────────────────────────
 
-async function reserveSeat(trainId, seat) {
-  // 선택한 좌석을 Mini Redis에 예약하는 함수야.
-  // /setnx를 사용해서 키가 없을 때만 저장해.
-  // 이미 예약된 좌석이면 서버가 success: false를 돌려줘서 중복 예약을 막아.
-  // 기존 /set은 항상 덮어쓰지만, /setnx는 "먼저 온 1명만 성공"이야.
+async function reserveSeat(seatNo) {
+  // 좌석 클릭 시 바로 예약하지 않고 5초 임시 선점을 시도해.
+  // TTL 동작을 보여주기 위해 임시 선점 → 확정 2단계로 나눠.
+  const key = `seat:${selectedTrain.id}:${seatNo}`;
+
   try {
-    const res = await fetch(`${API}/setnx`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        key: `seat:${trainId}:${seat}`,
-        value: "reserved",
-        ttl: 300,
-      }),
+    const res = await fetch(`${API}/hold`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key, value: 'hold', ttl: 5 })
     });
     const data = await res.json();
 
-    if (data.success) {
-      showToast(`${seat} 예약 완료!`);
-    } else {
-      showToast("이미 예약된 좌석입니다");
+    if (!data.success) {
+      showToast('이미 선점된 좌석입니다.');
+      return;
     }
-    await refreshSeats();
+
+    // 임시 선점 성공 → 카운트다운 시작
+    startHoldCountdown(seatNo, key, 5);
   } catch (e) {
     showToast("서버 연결에 실패했습니다");
   }
@@ -777,6 +831,120 @@ async function reserveSeat(trainId, seat) {
 // ──────────────────────────────────────────────
 // 동시 예약 시뮬레이션
 // ──────────────────────────────────────────────
+
+// ──────────────────────────────────────────────
+// 임시 선점 (Hold) 관련 함수
+// ──────────────────────────────────────────────
+
+let currentHoldKey = null;
+let currentHoldSeat = null;
+
+function startHoldCountdown(seatNo, key, seconds) {
+  // 임시 선점 후 카운트다운을 시작해.
+  // 시간이 지나면 자동으로 해제되고 좌석이 다시 초록색으로 바뀌어.
+
+  // 좌석 버튼 노란색으로 변경
+  const btn = document.getElementById(`seat-btn-${seatNo}`);
+  if (btn) {
+    btn.style.background = '#f9a825';
+    btn.style.color = '#fff';
+    btn.style.borderColor = '#f9a825';
+  }
+
+  // 확정 모달 표시
+  showConfirmModal(seatNo, key, seconds);
+
+  let remaining = seconds;
+  const interval = setInterval(async () => {
+    remaining--;
+
+    // 모달 타이머 업데이트
+    const timerEl = document.getElementById('holdTimer');
+    if (timerEl) timerEl.textContent = remaining;
+
+    // 오른쪽 패널 TTL 표시 업데이트
+    updateTTLDisplay(seatNo, remaining);
+
+    if (remaining <= 0) {
+      clearInterval(interval);
+      // TTL 만료 → 자동 해제
+      await refreshSeats();
+      closeConfirmModal();
+      showToast(`${seatNo} 선점 시간이 만료되었습니다.`);
+      // TTL 표시 초기화
+      const ttlSection = document.getElementById('ttlDisplay');
+      if (ttlSection) {
+        ttlSection.innerHTML = '<div style="color: #888; font-size: 0.9rem;">좌석 클릭 시 TTL 표시</div>';
+      }
+    }
+  }, 1000);
+
+  // 모달에 interval 저장 (취소 시 정리용)
+  window.currentHoldInterval = interval;
+}
+
+function showConfirmModal(seatNo, key, seconds) {
+  // 임시 선점 확정 모달을 보여주는 함수야.
+  currentHoldKey = key;
+  currentHoldSeat = seatNo;
+  document.getElementById('holdSeatName').textContent = seatNo;
+  document.getElementById('holdTimer').textContent = seconds;
+  document.getElementById('holdModal').style.display = 'block';
+}
+
+function closeConfirmModal() {
+  // 확정 모달을 닫고 타이머를 정리하는 함수야.
+  document.getElementById('holdModal').style.display = 'none';
+  clearInterval(window.currentHoldInterval);
+}
+
+async function confirmReservation() {
+  // 임시 선점을 정식 예약으로 확정해.
+  // hold 상태를 reserved로 바꾸고 TTL을 300초로 연장해.
+  await fetch(`${API}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: currentHoldKey, value: 'reserved', ttl: 300 })
+  });
+  closeConfirmModal();
+  await refreshSeats();
+  showToast(`${currentHoldSeat} 예약이 확정되었습니다!`);
+  // TTL 표시 초기화
+  const ttlSection = document.getElementById('ttlDisplay');
+  if (ttlSection) {
+    ttlSection.innerHTML = '<div style="color:#2e7d32;font-size:1rem;font-weight:700;">예약 확정 완료</div>';
+  }
+}
+
+async function cancelHold() {
+  // 임시 선점을 취소하고 좌석을 해제해.
+  await fetch(`${API}/delete/${encodeURIComponent(currentHoldKey)}`, {
+    method: 'DELETE'
+  });
+  closeConfirmModal();
+  await refreshSeats();
+  showToast(`${currentHoldSeat} 선점이 취소되었습니다.`);
+  // TTL 표시 초기화
+  const ttlSection = document.getElementById('ttlDisplay');
+  if (ttlSection) {
+    ttlSection.innerHTML = '<div style="color: #888; font-size: 0.9rem;">좌석 클릭 시 TTL 표시</div>';
+  }
+}
+
+function updateTTLDisplay(seatNo, remaining) {
+  // 오른쪽 패널에 현재 선점 중인 좌석의 TTL을 실시간으로 표시해.
+  const ttlSection = document.getElementById('ttlDisplay');
+  if (ttlSection) {
+    ttlSection.innerHTML = `
+      <div style="font-size: 0.9rem; color: #666; margin-bottom: 4px;">현재 선점 TTL</div>
+      <div style="font-size: 2rem; font-weight: 700; color: ${remaining <= 2 ? '#e53935' : '#f9a825'}">
+        ${remaining}초
+      </div>
+      <div style="font-size: 0.85rem; color: #888;">${seatNo} 임시 선점 중</div>
+    `;
+  }
+}
+
 
 function selectSeatForConcurrent(seatNo) {
   // 동시 예약 테스트용으로 좌석을 선택하는 함수야.
