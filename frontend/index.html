@@ -134,40 +134,88 @@
     .cache-badge.hit { background: #e8f5e9; color: #2e7d32; }
     .cache-badge.miss { background: #fff3e0; color: #e65100; }
 
-    /* 벤치마크 대시보드 스타일 */
-    .dashboard-section {
-      margin-bottom: 20px; padding-bottom: 16px;
-      border-bottom: 1px solid #eee;
+    /* ── 대시보드 패널 (발표용 큰 UI) ── */
+    .dashboard-panel { padding: 20px; overflow-y: auto; }
+    .dashboard-section { margin-bottom: 24px; }
+
+    /* 섹션 헤더 */
+    .panel-section-title {
+      font-size: 1rem; font-weight: 700; color: #333;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 2px solid #e0e0e0;
+      padding-bottom: 6px; margin-bottom: 12px;
     }
-    .dashboard-section:last-child { border-bottom: none; }
-    .dashboard-section h3 {
-      font-size: 13px; color: #888; margin-bottom: 8px; font-weight: 600;
+
+    /* 수치 (ms) — 크고 굵게 */
+    .metric-value { font-size: 2.5rem; font-weight: 700; line-height: 1; }
+    .metric-unit  { font-size: 1rem; color: #666; margin-left: 4px; }
+    .metric-label { font-size: 0.9rem; color: #888; margin-bottom: 4px; }
+
+    /* 마지막 요청 박스 */
+    .last-request-box {
+      background: #f5f5f5; border-radius: 8px;
+      padding: 14px; margin-bottom: 16px;
     }
-    .bar-chart-row {
-      display: flex; align-items: center; margin-bottom: 6px; font-size: 13px;
+    .last-request-status { font-size: 1.2rem; font-weight: 600; }
+    .last-request-time   { font-size: 1.8rem; font-weight: 700; color: #1e88e5; }
+
+    /* 바 차트 (벤치마크) */
+    .bar-container {
+      background: #f0f0f0; border-radius: 6px;
+      height: 28px; margin: 8px 0; overflow: hidden; position: relative;
     }
-    .bar-chart-label {
-      width: 90px; flex-shrink: 0; color: #555; font-size: 12px;
+    .bar-fill {
+      height: 100%; border-radius: 6px;
+      display: flex; align-items: center;
+      padding-left: 10px; font-size: 1rem; font-weight: 600;
+      color: white; transition: width 0.6s ease;
+      min-width: 4px;
     }
-    .bar-chart-bar {
-      height: 20px; border-radius: 3px; min-width: 2px;
-      transition: width 0.5s ease;
+    .bar-db   { background: #e53935; }
+    .bar-mini { background: #1e88e5; }
+    .bar-real { background: #43a047; }
+    .bar-item-label { font-size: 0.9rem; color: #555; font-weight: 600; margin-bottom: 2px; }
+    .bar-item-value { font-size: 0.85rem; color: #888; margin-top: 2px; }
+
+    /* Cache HIT/MISS 박스 */
+    .cache-stat-box { display: flex; gap: 12px; margin: 12px 0; }
+    .cache-hit-box {
+      flex: 1; background: #e8f5e9; border: 2px solid #43a047;
+      border-radius: 8px; padding: 12px; text-align: center;
     }
-    .bar-chart-value {
-      margin-left: 8px; font-size: 12px; color: #888; white-space: nowrap;
+    .cache-miss-box {
+      flex: 1; background: #fff3e0; border: 2px solid #fb8c00;
+      border-radius: 8px; padding: 12px; text-align: center;
     }
+    .cache-count { font-size: 2rem; font-weight: 700; }
+    .cache-rate  { font-size: 1.1rem; font-weight: 600; color: #2e7d32; margin-top: 4px; }
+
+    /* speedup 배지 */
+    .speedup-badge {
+      display: inline-block; background: #1e88e5; color: white;
+      font-size: 1.3rem; font-weight: 700;
+      padding: 6px 16px; border-radius: 20px; margin-top: 8px;
+    }
+
+    /* 벤치마크 버튼 */
+    .btn-benchmark {
+      width: 100%; padding: 14px; font-size: 1.1rem; font-weight: 600;
+      background: #1e88e5; color: white; border: none;
+      border-radius: 8px; cursor: pointer;
+    }
+    .btn-benchmark:hover { background: #1565c0; }
+
     .benchmark-controls select, .benchmark-controls input {
-      padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;
-      font-size: 13px;
+      padding: 6px 10px; border: 1px solid #ccc; border-radius: 6px;
+      font-size: 14px;
     }
-    .benchmark-controls button {
-      padding: 6px 14px; border: none; border-radius: 4px;
-      background: #0052A4; color: white; font-size: 13px;
-      cursor: pointer; font-weight: 600; margin-top: 8px; width: 100%;
+
+    /* 동시 예약 결과 (발표용) */
+    .concurrent-result-item { font-size: 1.1rem; padding: 6px 0; }
+    .concurrent-summary {
+      font-size: 1.2rem; font-weight: 600; margin-top: 10px;
+      padding: 10px; background: #e8f5e9; border-radius: 6px;
     }
-    .benchmark-controls button:hover { background: #003d7a; }
-    .stat-value { font-size: 20px; font-weight: 700; color: #333; }
-    .stat-label { font-size: 12px; color: #999; }
   </style>
 </head>
 <body>
@@ -207,72 +255,75 @@
   </div>
 
   <!-- 오른쪽 패널: 성능 대시보드 (30%) -->
-  <div class="right-panel">
-    <h2>📊 성능 대시보드</h2>
+  <div class="right-panel dashboard-panel">
+    <h2 style="font-size:1.3rem;margin-bottom:16px;">📊 성능 대시보드</h2>
 
     <!-- 마지막 요청 정보 -->
     <div class="dashboard-section">
-      <h3>마지막 요청</h3>
-      <div id="last-request-info">
-        <p style="color:#999;font-size:13px;">아직 요청 없음</p>
+      <div class="panel-section-title">마지막 요청</div>
+      <div class="last-request-box" id="last-request-info">
+        <p style="color:#999;font-size:1rem;">아직 요청 없음</p>
       </div>
     </div>
 
     <!-- 응답 시간 비교 바 차트 -->
     <div class="dashboard-section">
-      <h3>응답 시간 비교</h3>
+      <div class="panel-section-title">응답 시간 비교</div>
       <div id="response-time-chart">
-        <div class="bar-chart-row">
-          <span class="bar-chart-label">DB 직접 조회</span>
-          <div class="bar-chart-bar" id="bar-db" style="width:0;background:#ef5350;"></div>
-          <span class="bar-chart-value" id="bar-db-val">- ms</span>
+        <div>
+          <div class="bar-item-label">DB 직접 조회</div>
+          <div class="bar-container">
+            <div class="bar-fill bar-db" id="bar-db" style="width:0;"></div>
+          </div>
+          <div class="bar-item-value" id="bar-db-val">- ms</div>
         </div>
-        <div class="bar-chart-row">
-          <span class="bar-chart-label">Mini Redis</span>
-          <div class="bar-chart-bar" id="bar-mini" style="width:0;background:#42a5f5;"></div>
-          <span class="bar-chart-value" id="bar-mini-val">- ms</span>
+        <div>
+          <div class="bar-item-label">Mini Redis 캐시</div>
+          <div class="bar-container">
+            <div class="bar-fill bar-mini" id="bar-mini" style="width:0;"></div>
+          </div>
+          <div class="bar-item-value" id="bar-mini-val">- ms</div>
         </div>
-        <div class="bar-chart-row">
-          <span class="bar-chart-label">실제 Redis</span>
-          <div class="bar-chart-bar" id="bar-real" style="width:0;background:#66bb6a;"></div>
-          <span class="bar-chart-value" id="bar-real-val">- ms</span>
+        <div>
+          <div class="bar-item-label">실제 Redis (Docker)</div>
+          <div class="bar-container">
+            <div class="bar-fill bar-real" id="bar-real" style="width:0;"></div>
+          </div>
+          <div class="bar-item-value" id="bar-real-val">- ms (13번에서 추가)</div>
         </div>
       </div>
+      <div id="speedup-display"></div>
     </div>
 
     <!-- Cache Hit/Miss 현황 -->
     <div class="dashboard-section">
-      <h3>Cache Hit/Miss 현황</h3>
-      <div id="hit-miss-stats">
-        <div class="bar-chart-row">
-          <span class="bar-chart-label">HIT</span>
-          <div class="bar-chart-bar" id="bar-hit" style="width:0;background:#4caf50;"></div>
-          <span class="bar-chart-value" id="bar-hit-val">0회</span>
+      <div class="panel-section-title">Cache Hit/Miss 현황</div>
+      <div class="cache-stat-box">
+        <div class="cache-hit-box">
+          <div class="cache-count" style="color:#2e7d32;" id="hit-count-display">0</div>
+          <div style="font-size:0.9rem;color:#555;">HIT</div>
         </div>
-        <div class="bar-chart-row">
-          <span class="bar-chart-label">MISS</span>
-          <div class="bar-chart-bar" id="bar-miss" style="width:0;background:#ff9800;"></div>
-          <span class="bar-chart-value" id="bar-miss-val">0회</span>
-        </div>
-        <div style="font-size:13px;color:#555;margin-top:4px;">
-          적중률: <strong id="hit-rate">0%</strong>
+        <div class="cache-miss-box">
+          <div class="cache-count" style="color:#e65100;" id="miss-count-display">0</div>
+          <div style="font-size:0.9rem;color:#555;">MISS</div>
         </div>
       </div>
+      <div class="cache-rate" id="hit-rate">적중률: 0%</div>
     </div>
 
     <!-- 벤치마크 실행 -->
     <div class="dashboard-section">
-      <h3>벤치마크 실행</h3>
+      <div class="panel-section-title">벤치마크 실행</div>
       <div class="benchmark-controls">
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-          <label style="font-size:13px;">노선:</label>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+          <label style="font-size:14px;font-weight:600;">노선:</label>
           <select id="benchmarkFrom">
             <option value="서울">서울</option>
             <option value="부산">부산</option>
             <option value="대전">대전</option>
             <option value="대구">대구</option>
           </select>
-          <span style="font-size:13px;">→</span>
+          <span style="font-size:16px;font-weight:600;">→</span>
           <select id="benchmarkTo">
             <option value="부산">부산</option>
             <option value="서울">서울</option>
@@ -280,26 +331,26 @@
             <option value="대구">대구</option>
           </select>
         </div>
-        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
-          <label style="font-size:13px;">반복:</label>
-          <input type="number" id="benchmarkN" value="10" min="1" max="1000" style="width:60px;">
-          <span style="font-size:13px;">회</span>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+          <label style="font-size:14px;font-weight:600;">반복:</label>
+          <input type="number" id="benchmarkN" value="100" min="1" max="1000" style="width:70px;">
+          <span style="font-size:14px;">회</span>
         </div>
-        <button onclick="runBenchmark()">벤치마크 시작</button>
+        <button class="btn-benchmark" onclick="runBenchmark()">벤치마크 시작</button>
       </div>
-      <div id="benchmark-result" style="margin-top:8px;"></div>
+      <div id="benchmark-result" style="margin-top:12px;"></div>
     </div>
 
     <!-- 캐시 로그 -->
     <div class="dashboard-section">
-      <h3>캐시 로그</h3>
+      <div class="panel-section-title">캐시 로그</div>
       <div id="cache-log" style="max-height:150px;overflow-y:auto;"></div>
     </div>
 
     <!-- 동시 요청 결과 -->
     <div class="dashboard-section">
-      <h3>동시 요청 결과</h3>
-      <div id="concurrent-dashboard" style="font-size:13px;color:#999;">
+      <div class="panel-section-title">동시 요청 결과</div>
+      <div id="concurrent-dashboard" style="font-size:1rem;color:#999;">
         (동시 예약 시도 결과가 여기 표시됨)
       </div>
     </div>
@@ -733,14 +784,16 @@ async function concurrentReserve(trainId) {
     </div>
   `;
 
-  // 동시 요청 결과를 오른쪽 대시보드에도 표시해
+  // 동시 요청 결과를 오른쪽 대시보드에도 표시해 (발표용 큰 폰트)
   const concDash = document.getElementById('concurrent-dashboard');
   concDash.innerHTML = `
-    <div style="font-size:13px;">
-      <strong>${count}명 동시 시도</strong> (${totalTime}ms)
-      <div style="color:#2e7d32;">성공: ${successCount}명</div>
-      <div style="color:#c62828;">실패: ${failCount}명</div>
-      ${successUser ? `<div>최종 예약자: user-${successUser.userId}</div>` : ''}
+    <div>
+      <div class="concurrent-result-item"><strong>${count}명 동시 시도</strong> (${totalTime}ms)</div>
+      <div class="concurrent-result-item" style="color:#2e7d32;">성공: ${successCount}명</div>
+      <div class="concurrent-result-item" style="color:#c62828;">실패: ${failCount}명</div>
+      <div class="concurrent-summary">
+        ${successUser ? `🔒 최종 예약자: user-${successUser.userId}` : '예약 실패'}
+      </div>
     </div>
   `;
 
@@ -764,16 +817,15 @@ function updateDashboard(info) {
     missCount++;
   }
 
-  // 마지막 요청 정보 표시
+  // 마지막 요청 정보 표시 (발표용 큰 UI)
   const lastReqEl = document.getElementById('last-request-info');
   const isHit = info.type === 'HIT';
   lastReqEl.innerHTML = `
-    <div style="font-size:14px;margin-bottom:4px;">
-      출처: <strong style="color:${isHit ? '#2e7d32' : '#e65100'}">
-        Cache ${info.type} ${isHit ? '✅' : '⚠️'}
-      </strong>
+    <div class="last-request-status" style="color:${isHit ? '#2e7d32' : '#e65100'};">
+      ${isHit ? '✅' : '⚠️'} Cache ${info.type}
     </div>
-    <div style="font-size:14px;">응답 시간: <strong>${info.responseTime} ms</strong></div>
+    <div class="last-request-time">${info.responseTime} <span class="metric-unit">ms</span></div>
+    <div style="font-size:0.85rem;color:#888;margin-top:4px;">${info.key}</div>
   `;
 
   // 캐시 로그 추가
@@ -784,21 +836,16 @@ function updateDashboard(info) {
 }
 
 function updateHitMissChart() {
-  // 히트/미스 바 차트와 적중률을 업데이트하는 함수야.
-  // 히트와 미스 횟수에 따라 바 길이를 조절해.
+  // 히트/미스 박스와 적중률을 업데이트하는 함수야.
+  // 발표용으로 숫자가 크고 명확하게 보여.
   const total = hitCount + missCount;
-  const maxCount = Math.max(hitCount, missCount, 1);
 
-  const barHit = document.getElementById('bar-hit');
-  const barMiss = document.getElementById('bar-miss');
-  barHit.style.width = (hitCount / maxCount * 100) + 'px';
-  barMiss.style.width = (missCount / maxCount * 100) + 'px';
-  document.getElementById('bar-hit-val').textContent = hitCount + '회';
-  document.getElementById('bar-miss-val').textContent = missCount + '회';
+  document.getElementById('hit-count-display').textContent = hitCount;
+  document.getElementById('miss-count-display').textContent = missCount;
 
   // 적중률 계산
   const rate = total > 0 ? Math.round(hitCount / total * 100) : 0;
-  document.getElementById('hit-rate').textContent = rate + '%';
+  document.getElementById('hit-rate').textContent = '적중률: ' + rate + '%';
 }
 
 
@@ -831,6 +878,7 @@ function updateBenchmarkChart(data) {
   // 벤치마크 결과를 바 차트로 표시하는 함수야.
   // DB 조회 시간과 Mini Redis 시간을 비교해서 바 길이를 퍼센트로 계산해.
   // CSS width로 구현하니까 Canvas 같은 건 필요 없어.
+  // 바 안에 수치를 표시하고, 채워지는 애니메이션도 동작해.
   const max = Math.max(data.db_only_ms, data.mini_redis_ms, 1);
 
   // 응답 시간 비교 바 차트 업데이트
@@ -838,30 +886,46 @@ function updateBenchmarkChart(data) {
   const barMini = document.getElementById('bar-mini');
   const barReal = document.getElementById('bar-real');
 
-  barDb.style.width = Math.max((data.db_only_ms / max * 150), 2) + 'px';
-  barMini.style.width = Math.max((data.mini_redis_ms / max * 150), 2) + 'px';
+  const dbPct = Math.max((data.db_only_ms / max * 100), 2);
+  const miniPct = Math.max((data.mini_redis_ms / max * 100), 2);
+
+  barDb.style.width = dbPct + '%';
+  barDb.textContent = data.db_only_ms + ' ms';
+  barMini.style.width = miniPct + '%';
+  barMini.textContent = data.mini_redis_ms + ' ms';
 
   document.getElementById('bar-db-val').textContent = data.db_only_ms + ' ms';
   document.getElementById('bar-mini-val').textContent = data.mini_redis_ms + ' ms';
 
   // 실제 Redis는 13번에서 채움
   if (data.real_redis_ms !== null) {
-    barReal.style.width = Math.max((data.real_redis_ms / max * 150), 2) + 'px';
+    const realPct = Math.max((data.real_redis_ms / max * 100), 2);
+    barReal.style.width = realPct + '%';
+    barReal.textContent = data.real_redis_ms + ' ms';
     document.getElementById('bar-real-val').textContent = data.real_redis_ms + ' ms';
   } else {
-    barReal.style.width = '0px';
+    barReal.style.width = '0%';
     document.getElementById('bar-real-val').textContent = '- ms (13번에서 추가)';
   }
+
+  // speedup 배지 표시
+  const speedupDiv = document.getElementById('speedup-display');
+  speedupDiv.innerHTML = `<span class="speedup-badge">🚀 ${data.speedup}배 빠름</span>`;
 
   // 벤치마크 결과 요약
   const resultDiv = document.getElementById('benchmark-result');
   resultDiv.innerHTML = `
-    <div style="font-size:13px;color:#555;">
+    <div style="font-size:1rem;color:#555;">
       <div>반복 횟수: <strong>${data.iterations}회</strong></div>
-      <div>DB 직접: <strong>${data.db_only_ms}ms</strong></div>
-      <div>Mini Redis: <strong>${data.mini_redis_ms}ms</strong></div>
-      <div style="margin-top:4px;color:#0052A4;font-weight:700;">
-        속도 향상: ${data.speedup}배 빠름
+      <div style="margin-top:4px;">
+        <span class="metric-label">DB 직접</span>
+        <span class="metric-value" style="color:#e53935;">${data.db_only_ms}</span>
+        <span class="metric-unit">ms</span>
+      </div>
+      <div style="margin-top:4px;">
+        <span class="metric-label">Mini Redis</span>
+        <span class="metric-value" style="color:#1e88e5;">${data.mini_redis_ms}</span>
+        <span class="metric-unit">ms</span>
       </div>
     </div>
   `;
