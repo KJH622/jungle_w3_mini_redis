@@ -1080,10 +1080,10 @@ let currentHoldKey = null;
 let currentHoldSeat = null;
 
 async function startTTLPolling(seatNo, key) {
-  // 매초 실제 /ttl 엔드포인트를 호출해서 남은 시간을 가져와.
-  // 이게 Lazy Deletion 동작을 실시간으로 보여주는 핵심이야.
+  // 임시 선점 후 TTL을 매초 실시간으로 조회해.
+  // setInterval은 1초 후 첫 실행이라 점프가 생기므로
+  // 즉시 첫 조회 후 1초마다 반복하는 방식을 써.
 
-  // 좌석 버튼 노란색으로 변경
   const btn = document.getElementById(`seat-btn-${seatNo}`);
   if (btn) {
     btn.style.background = '#f9a825';
@@ -1091,44 +1091,48 @@ async function startTTLPolling(seatNo, key) {
     btn.style.borderColor = '#f9a825';
   }
 
-  // 확정 모달 표시
   showConfirmModal(seatNo, key);
 
-  // 오른쪽 패널 TTL 로그 초기화
   addTTLLog(`🔒 ${seatNo} 임시 선점 시작 (TTL: 5초)`, 'info');
   addTTLLog(`저장: SET ${key} = "hold" TTL=5`, 'code');
 
-  const pollInterval = setInterval(async () => {
-    // 실제 서버에 TTL 조회 요청
-    const res = await fetch(`${API}/ttl/${encodeURIComponent(key)}`);
-    const data = await res.json();
-    const ttl = data.ttl;
+  // 즉시 첫 번째 TTL 조회 실행 (점프 방지)
+  await pollTTL(seatNo, key);
+}
 
-    // 모달 타이머 업데이트
-    const timerEl = document.getElementById('holdTimer');
-    if (timerEl) timerEl.textContent = ttl > 0 ? ttl : 0;
+async function pollTTL(seatNo, key) {
+  // TTL을 조회하고 결과에 따라 다음 동작을 결정해.
+  // 재귀적으로 1초마다 자신을 호출해서 연속 조회해.
 
-    // 오른쪽 패널 TTL 표시 업데이트
-    updateTTLDisplay(seatNo, ttl);
+  const res = await fetch(`${API}/ttl/${encodeURIComponent(key)}`);
+  const data = await res.json();
+  const ttl = data.ttl;
 
-    if (ttl === -2) {
-      // TTL 만료 → Lazy Deletion 발동
-      clearInterval(pollInterval);
-      await handleLazyDeletion(seatNo, key);
+  // 모달 타이머 업데이트
+  const timerEl = document.getElementById('holdTimer');
+  if (timerEl) timerEl.textContent = ttl > 0 ? ttl : 0;
 
-    } else if (ttl === -1) {
-      // TTL 없음 (예약 확정된 경우)
-      clearInterval(pollInterval);
+  // 오른쪽 패널 TTL 표시
+  updateTTLDisplay(seatNo, ttl);
 
-    } else if (ttl > 0) {
-      // 남은 시간 로그
-      addTTLLog(`GET /ttl/${key} → ${ttl}초 남음`, 'code');
-    }
-  }, 1000);
+  if (ttl === -2) {
+    // 만료 → Lazy Deletion 처리
+    await handleLazyDeletion(seatNo, key);
 
-  // 모달에 interval 저장
-  window.currentPollInterval = pollInterval;
-  window.currentHoldInterval = pollInterval;
+  } else if (ttl === -1) {
+    // 예약 확정된 경우 → 폴링 종료
+    return;
+
+  } else if (ttl > 0) {
+    // 남은 시간 로그
+    addTTLLog(`GET /ttl/${key} → ${ttl}초 남음`, 'code');
+
+    // 1초 후 다시 조회
+    window.currentPollTimeout = setTimeout(
+      () => pollTTL(seatNo, key),
+      1000
+    );
+  }
 }
 
 async function handleLazyDeletion(seatNo, key) {
@@ -1199,15 +1203,25 @@ function showConfirmModal(seatNo, key) {
 }
 
 function closeConfirmModal() {
-  // 확정 모달을 닫고 타이머를 정리하는 함수야.
+  // 모달을 닫고 진행 중인 TTL 폴링을 멈춰.
   document.getElementById('holdModal').style.display = 'none';
-  clearInterval(window.currentHoldInterval);
+
+  // setInterval 대신 setTimeout을 쓰므로 clearTimeout으로 정리
+  if (window.currentPollTimeout) {
+    clearTimeout(window.currentPollTimeout);
+    window.currentPollTimeout = null;
+  }
+  // 기존 interval도 정리 (혹시 남아있을 경우)
+  if (window.currentPollInterval) {
+    clearInterval(window.currentPollInterval);
+    window.currentPollInterval = null;
+  }
 }
 
 async function confirmReservation() {
   // 임시 선점을 정식 예약으로 확정해.
   // hold 상태를 reserved로 바꾸고 TTL을 300초로 연장해.
-  clearInterval(window.currentPollInterval);
+  if (window.currentPollTimeout) clearTimeout(window.currentPollTimeout);
   await fetch(`${API}/confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1226,7 +1240,7 @@ async function confirmReservation() {
 
 async function cancelHold() {
   // 임시 선점을 취소하고 좌석을 해제해.
-  clearInterval(window.currentPollInterval);
+  if (window.currentPollTimeout) clearTimeout(window.currentPollTimeout);
   await fetch(`${API}/delete/${encodeURIComponent(currentHoldKey)}`, {
     method: 'DELETE'
   });
