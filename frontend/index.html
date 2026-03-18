@@ -379,6 +379,23 @@
       <div id="benchmark-result" style="margin-top:12px;"></div>
     </div>
 
+    <!-- Mini Redis vs 실제 Redis 비교 -->
+    <div class="dashboard-section">
+      <div class="panel-section-title">🔬 Mini Redis vs 실제 Redis 비교</div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <label style="font-size: 0.9rem;">반복 횟수:</label>
+        <input id="compareN" type="number" value="1000" min="100" max="10000"
+               style="width: 80px; padding: 4px 8px; font-size: 1rem; border: 1px solid #ddd; border-radius: 4px;">
+        <span style="font-size: 0.9rem;">회</span>
+      </div>
+      <button onclick="runRedisCompare()"
+              class="btn-benchmark"
+              style="background: #7b1fa2;">
+        🔬 비교 실행
+      </button>
+      <div id="redisCompareResult" style="display: none; margin-top: 12px;"></div>
+    </div>
+
     <!-- 캐시 로그 -->
     <div class="dashboard-section">
       <div class="panel-section-title">캐시 로그</div>
@@ -970,6 +987,75 @@ function updateBenchmarkChart(data) {
   `;
 }
 
+
+async function runRedisCompare() {
+  // Mini Redis와 실제 Redis의 순수 성능을 비교하는 함수야.
+  // DB I/O 없이 set/get만 반복해서 두 구현의 차이를 보여줘.
+  const n = document.getElementById('compareN').value;
+  const resultDiv = document.getElementById('redisCompareResult');
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<p style="color:#999;font-size:0.9rem;">비교 실행 중...</p>';
+
+  try {
+    const res = await fetch(`${API}/benchmark/redis-compare?n=${n}`);
+    const data = await res.json();
+
+    const realHtml = data.real_redis ? `
+      <div style="margin-top: 8px;">
+        <div style="font-size: 0.85rem; color: #666;">실제 Redis (TCP/Docker)</div>
+        <div style="font-size: 2rem; font-weight: 700; color: #43a047;">
+          ${data.real_redis.elapsed_ms} ms
+        </div>
+        <div style="font-size: 0.85rem; color: #888;">
+          ${data.real_redis.ops_per_sec.toLocaleString()} ops/sec
+        </div>
+      </div>
+    ` : '<div style="color: #888; font-size: 0.9rem;">실제 Redis 미연결</div>';
+
+    resultDiv.innerHTML = `
+      <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <div style="flex: 1; background: #e3f2fd; border: 2px solid #1e88e5;
+                    border-radius: 8px; padding: 12px; text-align: center;">
+          <div style="font-size: 0.85rem; color: #666;">Mini Redis (In-process)</div>
+          <div style="font-size: 2rem; font-weight: 700; color: #1e88e5;">
+            ${data.mini_redis.elapsed_ms} ms
+          </div>
+          <div style="font-size: 0.85rem; color: #888;">
+            ${data.mini_redis.ops_per_sec.toLocaleString()} ops/sec
+          </div>
+        </div>
+        <div style="flex: 1; background: #e8f5e9; border: 2px solid #43a047;
+                    border-radius: 8px; padding: 12px; text-align: center;">
+          ${realHtml}
+        </div>
+      </div>
+
+      <div style="background: #fff8e1; border-radius: 8px; padding: 12px;">
+        <div style="font-weight: 700; margin-bottom: 8px; font-size: 0.95rem;">
+          💡 로컬에서 Mini Redis가 빠른 이유
+        </div>
+        ${data.why_mini_faster_locally.map(reason => `
+          <div style="font-size: 0.85rem; color: #555; padding: 2px 0;">• ${reason}</div>
+        `).join('')}
+      </div>
+
+      <div style="background: #f3e5f5; border-radius: 8px; padding: 12px; margin-top: 8px;">
+        <div style="font-weight: 700; margin-bottom: 8px; font-size: 0.95rem;">
+          🚀 프로덕션에서 실제 Redis가 더 빠른 이유
+        </div>
+        ${data.why_real_redis_better_in_production.map(reason => `
+          <div style="font-size: 0.85rem; color: #555; padding: 2px 0;">• ${reason}</div>
+        `).join('')}
+      </div>
+
+      <div style="text-align: center; margin-top: 8px; font-size: 0.85rem; color: #888;">
+        ${data.operations.toLocaleString()}회 연산 (set + get × ${data.iterations.toLocaleString()})
+      </div>
+    `;
+  } catch (e) {
+    resultDiv.innerHTML = '<p style="color:#c62828;font-size:0.9rem;">비교 실행 실패</p>';
+  }
+}
 
 async function checkRedisStatus() {
   // 페이지 로드 시 실제 Redis 연결 상태를 확인해.
