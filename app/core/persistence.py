@@ -70,7 +70,7 @@ def load_snapshot(store) -> None:
     try:
         # 스냅샷 파일이 없으면 복원할 게 없으니 그냥 넘어간다.
         if not SNAPSHOT_PATH.exists():
-            print("[Persistence] 스냅샷 파일 없음 — 빈 상태로 시작")
+            print("[Persistence] 스냅샷 파일 없음 - 빈 상태로 시작")
             return
 
         with open(SNAPSHOT_PATH, "r", encoding="utf-8") as f:
