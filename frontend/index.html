@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini Redis - 열차 예약 데모</title>
+  <style>
+    /* 전체 레이아웃 초기화 및 기본 스타일 */
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Segoe UI', sans-serif; background: #f5f5f5; color: #333; }
+
+    /* 헤더 스타일 */
+    header {
+      background: #1a1a2e; color: white; padding: 16px 24px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    header h1 { font-size: 20px; }
+    header span { font-size: 13px; color: #aaa; }
+
+    /* 좌우 2단 레이아웃: 왼쪽 70%, 오른쪽 30% */
+    .container { display: flex; height: calc(100vh - 56px); }
+    .left-panel { width: 70%; padding: 24px; overflow-y: auto; }
+    .right-panel {
+      width: 30%; padding: 24px; background: #fff;
+      border-left: 1px solid #ddd; overflow-y: auto;
+    }
+    .right-panel h2 { font-size: 16px; margin-bottom: 12px; color: #555; }
+    #dashboard-content { color: #999; font-size: 14px; }
+
+    /* 노선 검색 바 */
+    .search-bar {
+      display: flex; gap: 12px; align-items: center;
+      background: #fff; padding: 16px; border-radius: 8px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin-bottom: 20px;
+    }
+    .search-bar select {
+      padding: 8px 12px; border: 1px solid #ccc; border-radius: 6px;
+      font-size: 14px; background: #fff;
+    }
+    .search-bar button {
+      padding: 8px 20px; border: none; border-radius: 6px;
+      background: #0052A4; color: white; font-size: 14px; cursor: pointer;
+    }
+    .search-bar button:hover { background: #003d7a; }
+    .search-bar label { font-size: 14px; font-weight: 600; }
+
+    /* 열차 카드 */
+    .train-card {
+      background: #fff; border-radius: 8px; padding: 16px 20px;
+      margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+      cursor: pointer; transition: box-shadow 0.2s;
+      border-left: 4px solid #0052A4;
+    }
+    .train-card:hover { box-shadow: 0 3px 8px rgba(0,0,0,0.15); }
+    .train-card.srt { border-left-color: #C8002B; }
+    .train-card .top-row {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 6px;
+    }
+    .train-card .train-id { font-weight: 700; font-size: 16px; }
+    .train-card .train-type {
+      font-size: 12px; padding: 2px 8px; border-radius: 4px;
+      color: white; font-weight: 600;
+    }
+    .train-type.ktx { background: #0052A4; }
+    .train-type.srt { background: #C8002B; }
+    .train-card .price { font-weight: 700; font-size: 16px; color: #0052A4; }
+    .train-card.srt .price { color: #C8002B; }
+    .train-card .route { font-size: 14px; color: #666; }
+    .train-card .select-btn {
+      float: right; font-size: 13px; color: #0052A4;
+      font-weight: 600; margin-top: 4px;
+    }
+    .train-card.srt .select-btn { color: #C8002B; }
+
+    /* 좌석 선택 화면 */
+    .seat-view { background: #fff; border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .seat-view h3 { margin-bottom: 4px; }
+    .seat-view .info { color: #666; font-size: 14px; margin-bottom: 16px; }
+    .seat-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; }
+    .seat-btn {
+      width: 56px; height: 44px; border: none; border-radius: 6px;
+      font-size: 13px; font-weight: 600; cursor: pointer; transition: 0.2s;
+    }
+    .seat-btn.available { background: #e8f5e9; color: #2e7d32; border: 1px solid #a5d6a7; }
+    .seat-btn.available:hover { background: #c8e6c9; }
+    .seat-btn.reserved { background: #eee; color: #999; cursor: not-allowed; border: 1px solid #ddd; }
+    .seat-legend { font-size: 13px; color: #666; margin-bottom: 20px; }
+
+    /* 동시 예약 시뮬레이션 영역 */
+    .concurrent-section {
+      border-top: 1px solid #eee; padding-top: 16px; margin-top: 8px;
+    }
+    .concurrent-section h4 { margin-bottom: 10px; font-size: 14px; }
+    .concurrent-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+    .concurrent-controls input {
+      width: 60px; padding: 6px 8px; border: 1px solid #ccc;
+      border-radius: 6px; text-align: center; font-size: 14px;
+    }
+    .concurrent-controls button {
+      padding: 6px 16px; border: none; border-radius: 6px;
+      background: #ff6f00; color: white; font-size: 13px;
+      cursor: pointer; font-weight: 600;
+    }
+    .concurrent-controls button:hover { background: #e65100; }
+
+    /* 결과 로그 */
+    .result-log {
+      background: #fafafa; border: 1px solid #eee; border-radius: 6px;
+      padding: 12px; font-size: 13px; max-height: 200px; overflow-y: auto;
+    }
+    .result-log .success { color: #2e7d32; }
+    .result-log .fail { color: #c62828; }
+
+    /* 뒤로가기 버튼 */
+    .back-btn {
+      border: none; background: none; color: #0052A4; font-size: 14px;
+      cursor: pointer; margin-bottom: 12px; font-weight: 600;
+    }
+    .back-btn:hover { text-decoration: underline; }
+
+    /* 토스트 알림 */
+    .toast {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      background: #333; color: white; padding: 12px 24px; border-radius: 8px;
+      font-size: 14px; opacity: 0; transition: opacity 0.3s; z-index: 999;
+    }
+    .toast.show { opacity: 1; }
+
+    /* 캐시 상태 표시 */
+    .cache-badge {
+      display: inline-block; font-size: 12px; padding: 2px 8px;
+      border-radius: 4px; font-weight: 600; margin-left: 8px;
+    }
+    .cache-badge.hit { background: #e8f5e9; color: #2e7d32; }
+    .cache-badge.miss { background: #fff3e0; color: #e65100; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Mini Redis - 열차 예약 데모</h1>
+  <span>해시 테이블 기반 인메모리 키-값 저장소</span>
+</header>
+
+<div class="container">
+  <!-- 왼쪽 패널: 열차 예약 앱 (70%) -->
+  <div class="left-panel" id="left-panel">
+    <!-- 노선 검색 바 -->
+    <div class="search-bar">
+      <label>출발지</label>
+      <select id="from-select">
+        <option value="서울">서울</option>
+        <option value="부산">부산</option>
+        <option value="대전">대전</option>
+        <option value="대구">대구</option>
+      </select>
+      <label>도착지</label>
+      <select id="to-select">
+        <option value="부산">부산</option>
+        <option value="서울">서울</option>
+        <option value="대전">대전</option>
+        <option value="대구">대구</option>
+      </select>
+      <button onclick="searchTrains()">조회하기</button>
+      <span id="cache-status"></span>
+    </div>
+
+    <!-- 열차 목록 또는 좌석 선택 화면이 여기에 표시됨 -->
+    <div id="main-content">
+      <p style="color:#999; text-align:center; margin-top:60px;">출발지와 도착지를 선택한 뒤 조회하기를 눌러주세요.</p>
+    </div>
+  </div>
+
+  <!-- 오른쪽 패널: 성능 대시보드 (30%) — 11번 프롬프트에서 채울 예정 -->
+  <div class="right-panel">
+    <h2>성능 대시보드</h2>
+    <div id="dashboard-content">
+      <p>캐시 히트/미스 로그가 여기에 표시됩니다.</p>
+      <div id="cache-log" style="margin-top: 12px;"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 토스트 알림 -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ──────────────────────────────────────────────
+// 목업 데이터 (하드코딩)
+// 실제 서비스에서는 API로 가져오지만, 데모용이라 미리 정해둔 데이터를 사용해.
+// ──────────────────────────────────────────────
+const TRAINS = [
+  { id: "KTX-101", type: "KTX", from: "서울", to: "부산", depart: "06:00", arrive: "08:30", price: 59800 },
+  { id: "KTX-103", type: "KTX", from: "서울", to: "부산", depart: "08:00", arrive: "10:30", price: 59800 },
+  { id: "SRT-201", type: "SRT", from: "서울", to: "부산", depart: "07:00", arrive: "09:20", price: 52600 },
+  { id: "SRT-203", type: "SRT", from: "서울", to: "부산", depart: "09:00", arrive: "11:20", price: 52600 },
+  { id: "KTX-301", type: "KTX", from: "서울", to: "대전", depart: "07:30", arrive: "08:20", price: 23700 },
+  { id: "SRT-401", type: "SRT", from: "서울", to: "대전", depart: "08:30", arrive: "09:15", price: 20900 },
+  { id: "KTX-501", type: "KTX", from: "서울", to: "대구", depart: "07:00", arrive: "08:50", price: 43500 },
+  { id: "SRT-601", type: "SRT", from: "서울", to: "대구", depart: "09:00", arrive: "10:45", price: 38400 },
+];
+
+// 각 열차별 좌석 번호 목록 (A1~A5, B1~B5 총 10개)
+const SEATS = ["A1","A2","A3","A4","A5","B1","B2","B3","B4","B5"];
+
+// API 서버 주소
+const API = "http://localhost:8000";
+
+
+// ──────────────────────────────────────────────
+// 유틸리티 함수
+// ──────────────────────────────────────────────
+
+function showToast(message) {
+  // 화면 아래에 잠깐 나타났다 사라지는 알림 메시지를 보여주는 함수야.
+  // 예약 성공/실패 같은 결과를 사용자에게 알려줄 때 사용해.
+  const toast = document.getElementById("toast");
+  toast.textContent = message;
+  toast.classList.add("show");
+  setTimeout(() => toast.classList.remove("show"), 2000);
+}
+
+function delay(ms) {
+  // 지정한 밀리초만큼 기다리는 함수야.
+  // 외부 API 호출 지연을 시뮬레이션할 때 사용해.
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function formatPrice(price) {
+  // 숫자를 한국 원화 형식으로 바꿔주는 함수야.
+  // 예: 59800 -> "59,800원"
+  return price.toLocaleString() + "원";
+}
+
+function addCacheLog(type, key) {
+  // 오른쪽 대시보드에 캐시 히트/미스 로그를 추가하는 함수야.
+  // 캐시를 사용했는지 안 했는지 시각적으로 확인할 수 있어.
+  const log = document.getElementById("cache-log");
+  const time = new Date().toLocaleTimeString();
+  const color = type === "HIT" ? "#2e7d32" : "#e65100";
+  const bg = type === "HIT" ? "#e8f5e9" : "#fff3e0";
+  log.innerHTML = `<div style="padding:6px 8px;margin-bottom:4px;border-radius:4px;font-size:12px;background:${bg};color:${color}">
+    <strong>${type}</strong> ${key} <span style="float:right;color:#999">${time}</span>
+  </div>` + log.innerHTML;
+}
+
+
+// ──────────────────────────────────────────────
+// 열차 검색 (Cache Aside Pattern 적용)
+// ──────────────────────────────────────────────
+
+async function searchTrains() {
+  // 출발지와 도착지에 맞는 열차 목록을 가져오는 함수야.
+  // Cache Aside 패턴을 적용해서:
+  // 1. 먼저 Mini Redis 캐시를 확인하고
+  // 2. 캐시에 없으면 목업 데이터에서 가져온 뒤 캐시에 저장해.
+  // 이렇게 하면 같은 노선을 반복 조회할 때 훨씬 빨라져.
+  const from = document.getElementById("from-select").value;
+  const to = document.getElementById("to-select").value;
+  const cacheKey = `trains:${from}:${to}`;
+  const statusEl = document.getElementById("cache-status");
+
+  let trains;
+  let cacheHit = false;
+
+  try {
+    // 1단계: 캐시 먼저 확인
+    const cached = await fetch(`${API}/get/${cacheKey}`);
+    if (cached.ok) {
+      // 캐시 히트! 저장해둔 데이터를 바로 사용한다.
+      const data = await cached.json();
+      trains = JSON.parse(data.value);
+      cacheHit = true;
+      addCacheLog("HIT", cacheKey);
+    }
+  } catch (e) {
+    // 서버 연결 실패 시 무시하고 캐시 미스로 처리
+  }
+
+  if (!cacheHit) {
+    // 2단계: 캐시 미스 -> 목업 데이터에서 필터링 (외부 API 호출 시뮬레이션)
+    await delay(500); // 외부 API 호출 지연 시뮬레이션 (500ms)
+    trains = TRAINS.filter(t => t.from === from && t.to === to);
+
+    // 3단계: 결과를 캐시에 저장 (TTL 60초)
+    try {
+      await fetch(`${API}/set`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ key: cacheKey, value: JSON.stringify(trains), ttl: 60 }),
+      });
+    } catch (e) {
+      // 캐시 저장 실패해도 결과는 보여줘야 하니까 무시
+    }
+    addCacheLog("MISS", cacheKey);
+  }
+
+  // 캐시 상태 배지 표시
+  statusEl.innerHTML = cacheHit
+    ? '<span class="cache-badge hit">Cache HIT</span>'
+    : '<span class="cache-badge miss">Cache MISS</span>';
+
+  // 열차 목록 화면 렌더링
+  renderTrainList(trains, from, to);
+}
+
+
+// ──────────────────────────────────────────────
+// 열차 목록 렌더링
+// ──────────────────────────────────────────────
+
+function renderTrainList(trains, from, to) {
+  // 검색 결과로 나온 열차들을 카드 형태로 화면에 보여주는 함수야.
+  // 각 카드를 클릭하면 해당 열차의 좌석 선택 화면으로 이동해.
+  const content = document.getElementById("main-content");
+
+  if (!trains || trains.length === 0) {
+    content.innerHTML = '<p style="color:#999;text-align:center;margin-top:60px;">해당 노선의 열차가 없습니다.</p>';
+    return;
+  }
+
+  let html = `<h3 style="margin-bottom:12px;">${from} -> ${to} 열차 목록</h3>`;
+
+  trains.forEach(train => {
+    const isSrt = train.type === "SRT";
+    html += `
+      <div class="train-card ${isSrt ? 'srt' : ''}" onclick="showSeats('${train.id}')">
+        <div class="top-row">
+          <span>
+            <span class="train-id">${train.id}</span>
+            <span class="train-type ${isSrt ? 'srt' : 'ktx'}">${train.type}</span>
+          </span>
+          <span class="price">${formatPrice(train.price)}</span>
+        </div>
+        <div class="route">${train.from} ${train.depart} -> ${train.to} ${train.arrive}</div>
+        <span class="select-btn">좌석 선택 &rarr;</span>
+      </div>
+    `;
+  });
+
+  content.innerHTML = html;
+}
+
+
+// ──────────────────────────────────────────────
+// 좌석 선택 화면
+// ──────────────────────────────────────────────
+
+async function showSeats(trainId) {
+  // 특정 열차의 좌석 현황을 Mini Redis에서 조회해서 보여주는 함수야.
+  // 각 좌석이 예약 가능한지 아닌지를 서버에 물어보고 화면에 표시해.
+  const train = TRAINS.find(t => t.id === trainId);
+  if (!train) return;
+
+  const content = document.getElementById("main-content");
+
+  // 각 좌석의 예약 상태를 Mini Redis에서 조회
+  const seatStatuses = await Promise.all(
+    SEATS.map(async seat => {
+      try {
+        const res = await fetch(`${API}/get/seat:${trainId}:${seat}`);
+        // 200이면 예약됨, 404면 예약 가능
+        return { seat, reserved: res.ok };
+      } catch (e) {
+        return { seat, reserved: false };
+      }
+    })
+  );
+
+  let seatsHtml = '';
+  seatStatuses.forEach(({ seat, reserved }) => {
+    if (reserved) {
+      seatsHtml += `<button class="seat-btn reserved" disabled>${seat} X</button>`;
+    } else {
+      seatsHtml += `<button class="seat-btn available" onclick="reserveSeat('${trainId}','${seat}')">${seat} O</button>`;
+    }
+  });
+
+  content.innerHTML = `
+    <button class="back-btn" onclick="searchTrains()">&larr; 목록으로</button>
+    <div class="seat-view">
+      <h3>${train.id} | ${train.from} -> ${train.to}</h3>
+      <div class="info">${train.depart} 출발 | ${formatPrice(train.price)}</div>
+
+      <div style="font-weight:600;margin-bottom:8px;">좌석 현황:</div>
+      <div class="seat-grid">${seatsHtml}</div>
+      <div class="seat-legend">O 예약 가능 &nbsp;&nbsp; X 예약 완료</div>
+
+      <div class="concurrent-section">
+        <h4>동시 예약 시뮬레이션</h4>
+        <div class="concurrent-controls">
+          <span>인원 수:</span>
+          <input type="number" id="concurrent-count" value="5" min="2" max="20">
+          <span>명</span>
+          <button onclick="concurrentReserve('${trainId}')">동시 예약 시도</button>
+        </div>
+        <div id="concurrent-result"></div>
+      </div>
+    </div>
+  `;
+}
+
+
+// ──────────────────────────────────────────────
+// 좌석 예약
+// ──────────────────────────────────────────────
+
+async function reserveSeat(trainId, seat) {
+  // 선택한 좌석을 Mini Redis에 예약하는 함수야.
+  // 1. 좌석이 이미 예약되었는지 확인하고
+  // 2. 비어있으면 예약을 저장해 (TTL 300초 = 5분 동안 유효)
+  // 3. 화면을 새로고침해서 좌석 상태를 업데이트해.
+  const key = `seat:${trainId}:${seat}`;
+
+  try {
+    // 이미 예약되었는지 확인
+    const check = await fetch(`${API}/get/${key}`);
+    if (check.ok) {
+      showToast("이미 예약된 좌석입니다");
+      return;
+    }
+
+    // 예약 저장 (TTL 300초)
+    const res = await fetch(`${API}/set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value: "reserved", ttl: 300 }),
+    });
+
+    if (res.ok) {
+      showToast(`${seat} 좌석 예약 완료!`);
+      // 좌석 화면 새로고침
+      showSeats(trainId);
+    } else {
+      showToast("예약에 실패했습니다");
+    }
+  } catch (e) {
+    showToast("서버 연결에 실패했습니다");
+  }
+}
+
+
+// ──────────────────────────────────────────────
+// 동시 예약 시뮬레이션
+// ──────────────────────────────────────────────
+
+async function concurrentReserve(trainId) {
+  // 같은 좌석(A1)을 여러 명이 동시에 예약 시도하는 시뮬레이션이야.
+  // fetch 요청을 N개 동시에 날리고 결과를 모아서 보여줘.
+  // threading.Lock 덕분에 실제로 예약에 성공하는 사람은 1명뿐이야.
+  const count = parseInt(document.getElementById("concurrent-count").value) || 5;
+  const resultDiv = document.getElementById("concurrent-result");
+  const seat = "A1"; // 테스트용으로 A1 좌석 사용
+  const key = `seat:${trainId}:${seat}`;
+
+  // 먼저 해당 좌석 예약을 초기화 (테스트를 위해)
+  try {
+    await fetch(`${API}/delete/${key}`, { method: "DELETE" });
+  } catch (e) {}
+
+  resultDiv.innerHTML = '<p style="color:#999">시뮬레이션 실행 중...</p>';
+
+  // N명이 동시에 같은 좌석을 예약 시도
+  // Promise.all로 모든 요청을 동시에 보낸다.
+  const promises = Array.from({ length: count }, (_, i) =>
+    fetch(`${API}/set`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key, value: `user-${i + 1}`, ttl: 300 }),
+    })
+      .then(res => ({ user: i + 1, ok: res.ok }))
+      .catch(() => ({ user: i + 1, ok: false }))
+  );
+
+  const results = await Promise.all(promises);
+
+  // 실제로 누가 예약했는지 확인
+  let winner = null;
+  try {
+    const check = await fetch(`${API}/get/${key}`);
+    if (check.ok) {
+      const data = await check.json();
+      winner = data.value;
+    }
+  } catch (e) {}
+
+  // 결과 표시
+  let html = `<div class="result-log"><strong>동시 예약 결과 (${count}명 시도, 좌석 ${seat}):</strong><br><br>`;
+  results.forEach(r => {
+    const isWinner = winner === `user-${r.user}`;
+    if (isWinner) {
+      html += `<div class="success">O 사용자 ${r.user} - 예약 성공 (최종 저장)</div>`;
+    } else {
+      html += `<div class="fail">X 사용자 ${r.user} - 덮어쓰기됨</div>`;
+    }
+  });
+  html += `<br><div style="color:#555">최종 예약자: <strong>${winner || "없음"}</strong></div>`;
+  html += '</div>';
+
+  resultDiv.innerHTML = html;
+
+  // 좌석 상태 새로고침
+  showSeats(trainId);
+}
+</script>
+</body>
+</html>
