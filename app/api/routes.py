@@ -267,44 +267,72 @@ async def benchmark_trains(n: int = 100, from_station: str = "서울", to_statio
 @router.post("/benchmark/concurrent")
 async def benchmark_concurrent(train_id: str, seat: str, n: int = 5):
     """
-    서버에서 직접 n개의 스레드가 동시에 같은 좌석을 예약 시도하는 엔드포인트야.
-    브라우저 JS는 싱글 스레드라 진짜 동시성 시연이 불가능해.
-    서버 threading을 쓰면 진짜 동시에 Lock 경쟁이 발생해.
+    서버에서 n개의 스레드가 동시에 같은 좌석을 예약 시도하는 엔드포인트야.
+    threading.Event로 모든 스레드가 준비된 후 동시에 출발시켜.
+    Barrier와 달리 Event 방식은 winner가 매번 달라져.
     """
     import threading
+    import time as time_module
 
     seat_key = f"seat:{train_id}:{seat}"
 
     # 테스트 전 해당 좌석 초기화
     store.delete(seat_key)
 
+    # 잠깐 대기 - delete가 완전히 반영되도록
+    time_module.sleep(0.01)
+
     results = []
     result_lock = threading.Lock()
 
-    # Barrier: 모든 스레드가 준비된 후 동시에 출발
-    # 마치 출발선에 모든 선수가 서 있다가 신호를 받고 동시에 뛰는 것처럼
-    barrier = threading.Barrier(n)
+    # 출발 신호용 Event
+    # set() 호출 전까지 모든 스레드가 wait()에서 대기해
+    start_event = threading.Event()
+
+    # 준비 완료 카운터
+    ready_count = [0]
+    ready_lock = threading.Lock()
 
     def try_reserve(user_id: int):
-        # 모든 스레드가 여기서 대기했다가 동시에 출발해
-        barrier.wait()
+        # 준비 완료 카운터 증가
+        with ready_lock:
+            ready_count[0] += 1
 
-        start = time()
+        # 출발 신호 대기
+        # 모든 스레드가 여기서 멈춰서 기다려
+        start_event.wait()
+
+        # 신호가 오면 동시에 setnx 시도
+        req_start = time_module.perf_counter()
         success = store.set_nx(seat_key, f"user-{user_id}", ttl=300)
-        elapsed = int((time() - start) * 1000)
+        req_end = time_module.perf_counter()
+
+        elapsed_ms = round((req_end - req_start) * 1000, 2)
 
         with result_lock:
             results.append({
                 "userId": user_id,
                 "success": success,
                 "message": "예약 성공" if success else "이미 예약된 좌석입니다",
-                "responseTime": elapsed
+                "responseTime": elapsed_ms
             })
 
-    # n개 스레드 생성 및 실행
-    threads = [threading.Thread(target=try_reserve, args=(i + 1,)) for i in range(n)]
+    # 모든 스레드 생성 및 시작
+    threads = [
+        threading.Thread(target=try_reserve, args=(i + 1,))
+        for i in range(n)
+    ]
     for t in threads:
         t.start()
+
+    # 모든 스레드가 준비될 때까지 대기
+    while ready_count[0] < n:
+        time_module.sleep(0.001)
+
+    # 출발 신호 발사 - 이 순간 모든 스레드가 동시에 setnx 시도
+    start_event.set()
+
+    # 모든 스레드 완료 대기
     for t in threads:
         t.join()
 
