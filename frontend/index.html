@@ -242,6 +242,7 @@
 <header>
   <h1>Mini Redis - 열차 예약 데모</h1>
   <span>해시 테이블 기반 인메모리 키-값 저장소</span>
+  <span id="redisStatusBadge" style="font-size:13px;">확인 중...</span>
 </header>
 
 <div class="container">
@@ -928,22 +929,6 @@ function updateBenchmarkChart(data) {
   // 벤치마크 결과를 바 차트 + 카드로 표시하는 함수야.
   // 바 차트: 수치는 바 오른쪽 밖에 표시해서 잘리지 않아.
   // 카드: DB / Mini Redis / 실제 Redis 수치를 크게 보여줘.
-  const max = Math.max(data.db_only_ms, data.mini_redis_ms, data.real_redis_ms || 1);
-
-  // 바 차트 업데이트 (수치는 .bar-value에 표시)
-  document.getElementById('bar-db').style.width = (data.db_only_ms / max * 100) + '%';
-  document.getElementById('bar-mini').style.width = Math.max((data.mini_redis_ms / max * 100), 2) + '%';
-  document.getElementById('bar-db-val').textContent = data.db_only_ms + ' ms';
-  document.getElementById('bar-mini-val').textContent = data.mini_redis_ms + ' ms';
-
-  // 실제 Redis는 13번에서 채움
-  if (data.real_redis_ms !== null) {
-    document.getElementById('bar-real').style.width = Math.max((data.real_redis_ms / max * 100), 2) + '%';
-    document.getElementById('bar-real-val').textContent = data.real_redis_ms + ' ms';
-  } else {
-    document.getElementById('bar-real').style.width = '0%';
-    document.getElementById('bar-real-val').textContent = '- ms';
-  }
 
   // 카드 수치 업데이트
   document.getElementById('cardDbMs').textContent = data.db_only_ms;
@@ -952,9 +937,29 @@ function updateBenchmarkChart(data) {
     document.getElementById('cardRealMs').textContent = data.real_redis_ms;
   }
 
+  // 바 차트 업데이트
+  const max = Math.max(data.db_only_ms, data.mini_redis_ms, data.real_redis_ms || 1);
+  document.getElementById('bar-db').style.width = (data.db_only_ms / max * 100) + '%';
+  document.getElementById('bar-mini').style.width = Math.max((data.mini_redis_ms / max * 100), 2) + '%';
+  document.getElementById('bar-db-val').textContent = data.db_only_ms + ' ms';
+  document.getElementById('bar-mini-val').textContent = data.mini_redis_ms + ' ms';
+
+  // 실제 Redis 바 차트 업데이트
+  if (data.real_redis_ms !== null) {
+    document.getElementById('bar-real').style.width = Math.max((data.real_redis_ms / max * 100), 2) + '%';
+    document.getElementById('bar-real-val').textContent = data.real_redis_ms + ' ms';
+  } else {
+    document.getElementById('bar-real').style.width = '0%';
+    document.getElementById('bar-real-val').textContent = '- ms';
+  }
+
   // speedup 배지 표시
   const speedupDiv = document.getElementById('speedup-display');
-  speedupDiv.innerHTML = `<span class="speedup-badge">🚀 ${data.speedup}배 빠름</span>`;
+  let badges = `<span class="speedup-badge">🚀 DB 대비 Mini Redis ${data.speedup_mini}배 빠름</span>`;
+  if (data.speedup_real) {
+    badges += `<br><span class="speedup-badge" id="speedupRealBadge" style="background:#43a047;margin-top:6px;">⚡ DB 대비 실제 Redis ${data.speedup_real}배 빠름</span>`;
+  }
+  speedupDiv.innerHTML = badges;
 
   // 벤치마크 결과 요약
   const resultDiv = document.getElementById('benchmark-result');
@@ -966,8 +971,30 @@ function updateBenchmarkChart(data) {
 }
 
 
-// 페이지 로드 시 드롭다운 초기 상태 설정
+async function checkRedisStatus() {
+  // 페이지 로드 시 실제 Redis 연결 상태를 확인해.
+  // Docker Redis가 켜져 있으면 녹색, 꺼져 있으면 빨간색으로 표시해.
+  try {
+    const res = await fetch(`${API}/redis/status`);
+    const data = await res.json();
+    const badge = document.getElementById('redisStatusBadge');
+    if (data.available) {
+      badge.textContent = '🟢 실제 Redis 연결됨';
+      badge.style.color = '#2e7d32';
+    } else {
+      badge.textContent = '🔴 실제 Redis 미연결';
+      badge.style.color = '#c62828';
+    }
+  } catch (e) {
+    const badge = document.getElementById('redisStatusBadge');
+    badge.textContent = '🔴 서버 미연결';
+    badge.style.color = '#c62828';
+  }
+}
+
+// 페이지 로드 시 드롭다운 초기 상태 설정 + Redis 상태 확인
 updateDestOptions();
+checkRedisStatus();
 </script>
 </body>
 </html>
