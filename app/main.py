@@ -6,9 +6,33 @@ Mini Redis — FastAPI 앱 진입점
 여기서 서버 설정, 라우터 등록, 기본 엔드포인트를 정의한다.
 """
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import router
+from app.core.store import store
+from app.core.persistence import load_snapshot, save_snapshot, start_auto_snapshot
+
+
+# ──────────────────────────────────────────────
+# 0. Lifespan (서버 시작/종료 이벤트)
+# ──────────────────────────────────────────────
+# 서버가 켜질 때와 꺼질 때 자동으로 실행되는 코드야.
+# 켜질 때: 이전에 저장해둔 스냅샷을 불러오고, 자동 저장을 시작해.
+# 꺼질 때: 마지막으로 한 번 더 스냅샷을 저장해서 데이터를 보존해.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # === 서버 시작 시 실행 ===
+    # 이전에 저장한 snapshot.json이 있으면 데이터를 복원한다.
+    load_snapshot(store)
+    # 60초마다 자동으로 스냅샷을 저장하는 백그라운드 스레드를 시작한다.
+    start_auto_snapshot(store, interval=60)
+    yield
+    # === 서버 종료 시 실행 ===
+    # 서버가 꺼지기 직전에 마지막으로 스냅샷을 한 번 더 저장한다.
+    save_snapshot(store)
+
 
 # ──────────────────────────────────────────────
 # 1. FastAPI 앱 인스턴스 생성
@@ -16,10 +40,12 @@ from app.api.routes import router
 # FastAPI 앱을 만드는 부분이야.
 # 마치 레스토랑을 열기 전에 간판을 다는 것처럼,
 # 우리 서버의 이름과 설명을 여기서 정해줘.
+# lifespan을 연결해서 서버 시작/종료 시 스냅샷 저장/복원이 자동으로 동작해.
 app = FastAPI(
     title="Mini Redis",
     description="해시 테이블 기반 인메모리 키-값 저장소",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # ──────────────────────────────────────────────
